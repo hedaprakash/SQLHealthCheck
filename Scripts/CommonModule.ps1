@@ -329,17 +329,6 @@ fnSendEmail -FromEmail  svcsqlmon@sqlfeatures.local -EmailHTML $EmailHTML -email
             }
     }
 
-    $DomainControllerFQDN = (([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).DomainControllers).name
-
-    $body="<br><br>User Domain is:" + $userDomain
-    $body+="<br><br>FQDN for domain is: " + $DomainControllerFQDN
-
-    $body+="<br><br>LocalServer : " + $HostName
-
-    $body+="<br><br>FromEmail : " + $fromemail
-    $body+="<br><br>ToEmail : " + $EmailSender
-    $body+="<br><br>smtpserver : " + $smtpserver
-
     if (!($ToEmail.Length -eq 0))  {$EmailSender = $ToEmail}
 
 

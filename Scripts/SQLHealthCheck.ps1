@@ -318,6 +318,7 @@ DROP TABLE #perf_counters_second
 
 
 " 
+
 	$RetQueryDB_PerfCounter= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_PerfCounter
     $RetQueryDB_PerfCounterResult = $RetQueryDB_PerfCounter.sqlresult
 	$RetQueryDB_PerfCounterResult | Format-Table
