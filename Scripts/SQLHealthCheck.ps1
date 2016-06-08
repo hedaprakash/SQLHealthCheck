@@ -1,9 +1,9 @@
 ﻿param (
-    [string]$dateTimeFull = "",
-    [string]$EmailSender = "pheda@advent.com",
+    [string]$EmailSender = "sqlfeature@gmail.com",
     [string]$ServerInstance = "AALLINONEE1\SQL_2014_STD",
     [string]$SqlUser = "svcvalidatesql",
-    [string]$SqlPassword = ""
+    [string]$SqlPassword = "",
+    [string]$smtpserver = ""
     )
     cls
 
@@ -37,12 +37,14 @@ $readIntent =$true
 $Observation=@()
 $lHostName = $ServerInstance
 $Logtime=Get-Date -format "yyyyMMddHHmmss"
-$LogPath="C:\Temp"
+$LogPath= join-path $ScriptDir -childpath "\pslogs"
 if(!(test-path $LogPath)){[IO.Directory]::CreateDirectory($LogPath)}
 
 # Update host name if SQL instance is passed
     if ($ServerInstance.IndexOf("\" )-ne -1)
     {$lHostName = $ServerInstance.Split('\') | Select-Object -First 1}
+
+$ExecutionSummaryLogFile=$LogPath + "\" + $lHostName + "_ExecutionSummary_" + $Logtime + ".html"
 
 # get full FQDN if not already passed, this allow support for multiple domains
 Try{
@@ -59,7 +61,7 @@ catch
         $_.exception.message | write-PHLog  -echo -Logtype Debug2
         $emailSubject=$lHostName + ": Could not resolve server name - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
         $RetsqlConfigHTML="Pass FQDN for server name"
-        fnSendEmail -FromEmail  svcsqlmon@advent.com -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "VMSFDBSUPPORT.advent.com"
+        fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "AALLINONEE1" -smtpserver $smtpserver
         exit
     }
 
@@ -70,7 +72,7 @@ $ExecutionSummaryLogFile=$LogPath + "\" + $lHostName + "_ExecutionSummary_" + $L
 
 "Checking if SQL instance access is working" | write-PHLog -echo -Logtype Debug2
 $queryToCheckSQLAccess="select @@servername as RetServername"
-$RetCheckSQlAccess = ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $queryToCheckSQLAccess
+$RetCheckSQlAccess = fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $queryToCheckSQLAccess
 if ($RetCheckSQlAccess.TestSqlAcces -eq $false) 
 {
     $FailedConnection= [pscustomobject] @{
@@ -82,7 +84,7 @@ if ($RetCheckSQlAccess.TestSqlAcces -eq $false)
     $FailedConnection | write-PHLog -echo -Logtype Error
     $emailSubject=$ServerInstance + ": Could not connect to SQL instance $ServerInstance - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
     $RetsqlConfigHTML= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
-    fnSendEmail -FromEmail  svcsqlmon@advent.com -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "VMSFDBSUPPORT.advent.com"
+    fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "AALLINONEE1" -smtpserver $smtpserver
     exit
 }
 
@@ -136,7 +138,7 @@ WHERE session_id = 1
 
 " 
 
-    $RetSystemSummary = ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerySystemSummary 
+    $RetSystemSummary = fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerySystemSummary 
     $RetSystemSummaryResult = $RetSystemSummary.sqlresult
 	$RetSystemSummaryResult | Format-Table
     $body="<H2>SQL Summary</H2>" 
@@ -316,7 +318,7 @@ DROP TABLE #perf_counters_second
 
 
 " 
-	$RetQueryDB_PerfCounter= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_PerfCounter
+	$RetQueryDB_PerfCounter= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_PerfCounter
     $RetQueryDB_PerfCounterResult = $RetQueryDB_PerfCounter.sqlresult
 	$RetQueryDB_PerfCounterResult | Format-Table
     $body="<H2>Database perf counters</H2>" 
@@ -408,7 +410,7 @@ select * from tempdb..tmpWaitStats
 
 
 " 
-	$RetQueryDB_WaitStats= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_WaitStats
+	$RetQueryDB_WaitStats= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_WaitStats
     $RetQueryDB_WaitStatsResult = $RetQueryDB_WaitStats.sqlresult
 	$RetQueryDB_WaitStatsResult | Format-Table
     $body="<H2>Database Wait Stats</H2>" 
@@ -416,7 +418,7 @@ select * from tempdb..tmpWaitStats
 
 "Collect SQL OS waits from sys.dm_os_waiting_tasks" | write-PHLog -echo -Logtype Debug2
     $QueryDB_WaitTasks="select * from tempdb..tmpWaitTasks"
-	$RetQueryDB_WaitTasks= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_WaitTasks
+	$RetQueryDB_WaitTasks= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_WaitTasks
     $RetQueryDB_WaitTasksResult = $RetQueryDB_WaitTasks.sqlresult
 	$RetQueryDB_WaitTasksResult | Format-Table
     $body="<H2>OS Wait Tasks</H2>" 
@@ -497,7 +499,7 @@ $Querysp_configure=
     )
 
 " 
-	$RetQuerysp_configure= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $Querysp_configure
+	$RetQuerysp_configure= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $Querysp_configure
     $RetQuerysp_configureResult = $RetQuerysp_configure.sqlresult
 	$RetQuerysp_configureResult | Format-Table
     $body="<H2>Database configuration</H2>" 
@@ -590,12 +592,12 @@ $QuerydatabaseIOLatency=
 " 
 if ($readIntent -eq $true)
 {
-	$RetatabaseIOLatency= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseIOLatency -ReadIntentTrue $readIntent
-    $RetatabaseIOLatency= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..DiskLatency order by Latency desc"
+	$RetatabaseIOLatency= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseIOLatency -ReadIntentTrue $readIntent
+    $RetatabaseIOLatency= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..DiskLatency order by Latency desc"
 }
 else
 {
-    $RetatabaseIOLatency= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseIOLatency
+    $RetatabaseIOLatency= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseIOLatency
 }
     $RetatabaseIOLatencyResult = $RetatabaseIOLatency.sqlresult
 	$RetatabaseIOLatencyResult | Format-Table
@@ -750,12 +752,12 @@ select * from tempdb..tmpphdatabaseUsageSummary
 " 
 if ($readIntent -eq $true)
 {
-	$RetdatabaseUsageSummary= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsageSummary -ReadIntentTrue $readIntent
-    $RetdatabaseUsageSummary= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseUsageSummary"
+	$RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsageSummary -ReadIntentTrue $readIntent
+    $RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseUsageSummary"
 }
 else
 {
-    $RetdatabaseUsageSummary= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsageSummary
+    $RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsageSummary
 }
     $RetdatabaseUsageSummaryResult = $RetdatabaseUsageSummary.sqlresult
 	$RetdatabaseUsageSummaryResult | Format-Table
@@ -852,12 +854,12 @@ select * from tempdb..tmpphdatabaseGrowth
 " 
 if ($readIntent -eq $true)
 {
-	$RetQuerydatabaseGrowth= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseGrowth -ReadIntentTrue $readIntent
-    $RetQuerydatabaseGrowth= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseGrowth"
+	$RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseGrowth -ReadIntentTrue $readIntent
+    $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseGrowth"
 }
 else
 {
-    $RetQuerydatabaseGrowth= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseGrowth 
+    $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseGrowth 
 }
 	
     $RetQuerydatabaseGrowthResult = $RetQuerydatabaseGrowth.sqlresult
@@ -975,12 +977,12 @@ order by DatabaseSize desc,DatabaseName,FileType desc
 
 if ($readIntent -eq $true)
 {
-	$RetQuerydatabaseUsage= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsage -ReadIntentTrue $readIntent
-    $RetQuerydatabaseUsage= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseUsage order by DatabaseSize desc"
+	$RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsage -ReadIntentTrue $readIntent
+    $RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseUsage order by DatabaseSize desc"
 }
 else
 {
-	$RetQuerydatabaseUsage= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsage }
+	$RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsage }
 
 
     $RetQuerydatabaseUsageResult = $RetQuerydatabaseUsage.sqlresult
@@ -1052,7 +1054,7 @@ order by SpaceInMB desc
 
 "@
  
-	$RetQuerydatabaseTopTables= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseTopTables
+	$RetQuerydatabaseTopTables= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseTopTables
     $RetQuerydatabaseTopTablesResult = $RetQuerydatabaseTopTables.sqlresult
 	$RetQuerydatabaseTopTablesResult | Format-Table
     $body="<H2>Database Top tables </H2>" 
@@ -1130,7 +1132,7 @@ order by record_id desc
 
 
 " 
-	$RetQuerydatabaseCPUUsage= ExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseCPUUsage
+	$RetQuerydatabaseCPUUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseCPUUsage
     $RetQuerydatabaseCPUUsageResult = $RetQuerydatabaseCPUUsage.sqlresult
 	$RetQuerydatabaseCPUUsageResult | Format-Table
     $body="<H2>Database CPu Usage </H2>" 
@@ -1297,4 +1299,4 @@ order by record_id desc
 
 "Sending email with all observations" | write-PHLog -echo -Logtype Debug2
 $emailSubject=$ServerInstance + ": Server Summary as of - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString()) " 
-fnSendEmail -FromEmail  svcsqlmon@advent.com -EmailHTML $RetsqlConfigHTMLCombined -emailSubject $emailSubject -HostName $lHostName
+fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTMLCombined -emailSubject $emailSubject -HostName $lHostName -smtpserver $smtpserver

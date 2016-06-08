@@ -1,4 +1,5 @@
-﻿$a = "<style>"
+﻿# HTML table Formatting for email
+$a = "<style>"
 $a = $a + "BODY{background-color:peachpuff;}"
 $a = $a + "TABLE{border-width: 1px;border-style: solid;border-color: black;border-collapse: collapse;}"
 $a = $a + "TH{border-width: 1px;padding: 0px;border-style: solid;border-color: black;background-color:thistle}"
@@ -11,6 +12,7 @@ $a = $a + "td.datacellthistle {background-color: #CC9999; color: black;}"
 $a = $a + "</style>"
 
 
+# Function to write logs to HTML log file with color coded format
 function write-PHLog {
     param([string] $Logtype,
           [string] $fileName,
@@ -74,8 +76,8 @@ set-location c:\ -PassThru | out-null
 }
 
 
-
- function ExecuteQuery (
+# Function to execute SQL commands and trap errors gracefully
+function fnExecuteQuery (
   [string] $ServerInstance = $(throw "DB Server Name must be specified."),
   [string] $Database = "master",
   [string] $Query = $(throw "QueryToExecute must be specified."),
@@ -135,7 +137,7 @@ set-location c:\ -PassThru | out-null
 }
 
 
-
+# Function to execute OS WMI commands via XP_cmdshell and trap errors gracefully
 function fnExecuteXMCmdShell (
   [string] $NodeName = $(throw "User Name must be specified."),
   [string] $CommandToExecute = $(throw "User Name must be specified.")
@@ -199,20 +201,20 @@ begin
 end
 "
 
-#ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisableXP_cmdshell
-#ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisable_AdvanceOptionsConfigValue
+#fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisableXP_cmdshell
+#fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisable_AdvanceOptionsConfigValue
 
     try
 	{
 
-	    $Ret_AdvanceOptionsConfigValue = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryGet_AdvanceOptionsConfigValue
+	    $Ret_AdvanceOptionsConfigValue = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryGet_AdvanceOptionsConfigValue
         if (($Ret_AdvanceOptionsConfigValue.TestSqlAcces -eq $true) )
         {
             $UserName=$Ret_AdvanceOptionsConfigValue.UserName
             $AdvanceOptionsConfigValue = $Ret_AdvanceOptionsConfigValue.sqlresult.config_value
             if ($Ret_AdvanceOptionsConfigValue.sqlresult.config_value -eq 0) 
             {		    
-            $retEnable_AdvanceOptionsConfigValue = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryEnable_AdvanceOptionsConfigValue
+            $retEnable_AdvanceOptionsConfigValue = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryEnable_AdvanceOptionsConfigValue
                 if (!($retEnable_AdvanceOptionsConfigValue.TestSqlAcces -eq $true))
                 {
                     $SQLResult=$retEnable_AdvanceOptionsConfigValue.sqlresult 
@@ -221,13 +223,13 @@ end
                 }
             }
 
-            $RetGet_XP_cmdshellValue = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryGet_XP_cmdshellValue
+            $RetGet_XP_cmdshellValue = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryGet_XP_cmdshellValue
             if ($RetGet_XP_cmdshellValue.TestSqlAcces -eq $true) 
             {
                 $XPCMDShellConfigValue = $RetGet_XP_cmdshellValue.sqlresult.config_value
                 if ($RetGet_XP_cmdshellValue.sqlresult.config_value -eq 0) 
                 {		    
-                    $retQueryEnableXP_cmdshell = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryEnableXP_cmdshell
+                    $retQueryEnableXP_cmdshell = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryEnableXP_cmdshell
                     if (!($retQueryEnableXP_cmdshell.TestSqlAcces -eq $true))
                     {
                         $SQLResult=$retQueryEnableXP_cmdshell.sqlresult 
@@ -244,7 +246,7 @@ end
                 Write-error ("not able to get XPCmdshell configuration `n" + $ErrorMessage)
             }
 
-            $RetGet_XP_cmdshellCommandToexecute = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryGet_XP_cmdshellCommandToexecute 
+            $RetGet_XP_cmdshellCommandToexecute = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryGet_XP_cmdshellCommandToexecute 
             if ($RetGet_XP_cmdshellCommandToexecute.TestSqlAcces -eq $true)
             {
                 $CommandSuccess=$true
@@ -265,11 +267,11 @@ end
 
         if (($XPCMDShellConfigValue -eq 0) -and ($Ret_AdvanceOptionsConfigValue.TestSqlAcces -eq $true))
         {
-    	    $Ret_DisableXP_cmdshell = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisableXP_cmdshell
+    	    $Ret_DisableXP_cmdshell = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisableXP_cmdshell
         }
         if (($AdvanceOptionsConfigValue -eq 0) -and ($Ret_AdvanceOptionsConfigValue.TestSqlAcces -eq $true))
         {
-    	    $RetDisable_AdvanceOptionsConfigValue = ExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisable_AdvanceOptionsConfigValue
+    	    $RetDisable_AdvanceOptionsConfigValue = fnExecuteQuery -ServerInstance $NodeName -Database "master" -Query $QueryDisable_AdvanceOptionsConfigValue
             
         }
 
@@ -296,33 +298,36 @@ end
     return $functionVariables
 }
 
+#Function to Send emails
+
 function fnSendEmail
 (
   [string] $FromEmail = $(throw "From email must be specified."),
   [string] $emailSubject = $(throw "Email Subject must be specified."),
   [string] $EmailHTML = $(throw "Email content must be specified."),
   [string] $HostName = $(throw "Host Name must be specified."),
+  [string] $smtpserver = "",
   [string] $ToEmail = "")
 <#
 $RetsqlConfigHTML="test"
 $EmailHTML="Test"
-$fromemail= "svcsqlmon@advent.com"
+$fromemail= "svcsqlmon@sqlfeatures.local"
 $emailSubject=$lServerName + ": Server Summary as of - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString()) " 
-fnSendEmail -FromEmail  svcsqlmon@advent.com -EmailHTML $EmailHTML -emailSubject $emailSubject
+fnSendEmail -FromEmail  svcsqlmon@sqlfeatures.local -EmailHTML $EmailHTML -emailSubject $emailSubject -Host "AALLINONEE1"
 #>
 {
 
     $userDomain=$env:userdnsdomain
-    switch ($userDomain) 
-        { 
-            "SQLFEATURES.LOCAL" {$smtpserver="sfsmtp.advent.com"} 
-            "PROD.DX" {$smtpserver="sacmail.prod.dx"} 
-            "ctp.dev.com" {$smtpserver="sfsmtp.advent.com"} 
-            "ctp.prod.com" {$smtpserver="sfsmtp.advent.com"} 
-            "APPS.CLOUD.ADVENT" {$smtpserver="sfsmtp.advent.com"} 
-            "CLOUD.ADVENT" {$smtpserver="sfsmtp.advent.com"} 
-            default {$smtpserver="sfsmtp.advent.com"}
-        }
+
+    if ($smtpserver -eq "")
+    {
+        switch ($userDomain) 
+            { 
+                "SQLFEATURES.LOCAL" {$smtpserver="mail.sqlfeatures.local"} 
+                "Contoso.local" {$smtpserver="mail.sqlfeatures.local"} 
+                default {$smtpserver="mail.sqlfeatures.local"}
+            }
+    }
 
     $DomainControllerFQDN = (([System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()).DomainControllers).name
 
@@ -336,7 +341,7 @@ fnSendEmail -FromEmail  svcsqlmon@advent.com -EmailHTML $EmailHTML -emailSubject
     $body+="<br><br>smtpserver : " + $smtpserver
 
     if (!($ToEmail.Length -eq 0))  {$EmailSender = $ToEmail}
-    if ($EmailSender.Length -eq 0) {$EmailSender = "pheda@advent.com"}
+
 
     $ErrorActionPreference = "Stop"                        
     $messageParameters = @{                        
@@ -345,8 +350,6 @@ fnSendEmail -FromEmail  svcsqlmon@advent.com -EmailHTML $EmailHTML -emailSubject
         From = $fromemail                       
 
         To = $EmailSender
-        CC="pheda@advent.com"            
-                
         SmtpServer = $smtpserver
 
     }                        
