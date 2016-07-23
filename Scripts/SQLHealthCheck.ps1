@@ -1,11 +1,10 @@
 ﻿param (
     [string]$EmailSender = "sqlfeature@gmail.com",
-    [string]$ServerInstance = "AALLINONEE1\SQL_2014_STD",
-    [string]$SqlUser = "svcvalidatesql",
+    [string]$ServerInstance = "localhost\SQL_2014_STD",
+    [string]$SqlUser = "",
     [string]$SqlPassword = "",
     [string]$smtpserver = ""
     )
-    cls
 
 #+-------------------------------------------------------------------+    
 #| = : = : = : = : = : = : = : = : = : = : = : = : = : = : = : = : = |    
@@ -20,8 +19,9 @@
 #|: |05-16-2015 1.0     Prakash Heda  Initial version                |
 #|: |07-25-2015 1.1     Prakash Heda  Additional checks added        |
 #|: |01-07-2016 1.2     Prakash Heda  Support added for SQL 2016     |
-#|: |03-02-2016 1.3     Prakash Heda  Eamil support added           |
-#|: |06-02-2016 2.0     Prakash Heda  multiple bug fixes           |
+#|: |03-02-2016 1.3     Prakash Heda  Eamil support added            |
+#|: |06-02-2016 2.0     Prakash Heda  multiple bug fixes             |
+#|: |07-22-2016 2.1     Prakash Heda  multiple bug fixes             |
 #|{>\-------------------------------------------------------------/<}|  
 #| = : = : = : = : = : = : = : = : = : = : = : = : = : = : = : = : = |  
 #+-------------------------------------------------------------------+  
@@ -57,7 +57,8 @@ Try{
 catch
     {
 
-        "Not able to get DNS server name for: $lHostName "| write-PHLog  -echo -Logtype Debug2
+        "Not able to get DNS server name for: $lHostName "| write-PHLog  -echo -Logtype Warning
+        "Try to ping server name to see if its up: $lHostName "| write-PHLog  -echo -Logtype Error
         $_.exception.message | write-PHLog  -echo -Logtype Debug2
         $emailSubject=$lHostName + ": Could not resolve server name - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
         $RetsqlConfigHTML="Pass FQDN for server name"
@@ -66,7 +67,7 @@ catch
     }
 
 $ExecutionSummaryLogFile=$LogPath + "\" + $lHostName + "_ExecutionSummary_" + $Logtime + ".html"
-"Starting run for $lHostName"| write-PHLog -echo -Logtype Debug
+"Starting run for $lHostName"| write-PHLog -echo -Logtype Success
 "ServerInstance: $ServerInstance    HostName: $lHostName "| write-PHLog -echo -Logtype Debug2
 "Execution Log File:  $ExecutionSummaryLogFile "| write-PHLog -echo -Logtype Debug2
 
@@ -81,7 +82,10 @@ if ($RetCheckSQlAccess.TestSqlAcces -eq $false)
         FailedConnection="Access to DB server: $ServerInstance is not working"
         ErrorMessage=$RetCheckSQlAccess.ExecuteSQLError
         }
-    $FailedConnection | write-PHLog -echo -Logtype Error
+    $FailedConnection | write-PHLog -echo -Logtype Warning
+    $FailedConnection.ErrorMessage | write-PHLog -echo -Logtype Warning
+    "Verify connecting to ServerInstance $($FailedConnection.ServerInstance) manually via SSMS"| write-PHLog -echo -Logtype Error
+    "Verify telnet command to check sql port: telnet $lHostName 1433"| write-PHLog -echo -Logtype Error
     $emailSubject=$ServerInstance + ": Could not connect to SQL instance $ServerInstance - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
     $RetsqlConfigHTML= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "AALLINONEE1" -smtpserver $smtpserver
@@ -148,13 +152,13 @@ WHERE session_id = 1
 
 "Collect processor information" | write-PHLog -echo -Logtype Debug2
 $GetProcessorCount= 'powershell.exe -c "$colItems =Get-WmiObject -class "Win32_Processor" -namespace "root/CIMV2" ;    $NOfLogicalCPU = 0;    foreach ($objcpu in $colItems)    {$NOfLogicalCPU = $NOfLogicalCPU + ($objcpu.NumberOfLogicalProcessors) }; $NOfLogicalCPU "'
-$RetProcessorCount =fnExecuteXMCmdShell  $ServerInstance $GetProcessorCount
+$RetProcessorCount =fnExecuteXPCmdShell  $ServerInstance $GetProcessorCount
 $TotalProcessorCount=$RetProcessorCount.SQLResult.output|out-string
 
 
 "Collect last boot time" | write-PHLog -echo -Logtype Debug2
 $GetMemorySpecs= 'powershell.exe -c "Get-WmiObject Win32_OperatingSystem | select csname,lastbootuptime,TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-XML -NoTypeInformation -As String"  '
-$RetMemorySpecs =fnExecuteXMCmdShell  $ServerInstance $GetMemorySpecs
+$RetMemorySpecs =fnExecuteXPCmdShell  $ServerInstance $GetMemorySpecs
 $RetMemorySpecsresult1=($RetMemorySpecs.SQLResult.output)
 $RetMemorySpecsresult2 =[xml]"$RetMemorySpecsresult1 "
 $LastBootTime=$RetMemorySpecsresult2.objects.object.SelectSingleNode('Property[@Name="lastbootuptime"]').innerxml
@@ -163,7 +167,7 @@ $Boot.ConvertToDateTime($LastBootTime)
 
 "Collect OS related details" | write-PHLog -echo -Logtype Debug2
 $GetServerSpecs= 'powershell.exe -c "Get-WmiObject Win32_ComputerSystem | select Name,Model, Manufacturer, Description, DNSHostName,Domain, DomainRole, PartOfDomain, NumberOfProcessors,NumberOfLogicalProcessors,SystemType, TotalPhysicalMemory, UserName,Workgroup,CurrentTimeZone | ConvertTo-XML -NoTypeInformation -As String" '
-$RetServerSpecs =fnExecuteXMCmdShell  $ServerInstance $GetServerSpecs
+$RetServerSpecs =fnExecuteXPCmdShell  $ServerInstance $GetServerSpecs
 
 "Convert XML output to PS object" | write-PHLog -echo -Logtype Debug2
 if ($RetServerSpecs.ExecuteXMCmdShellError.length -eq 0) 
@@ -609,7 +613,7 @@ else
 
 "Collecting OS Disk Stats" | write-PHLog -echo -Logtype Debug2
 $GetDiskSpecs= 'powershell.exe -c "Get-WmiObject Win32_LogicalDisk -filter "DriveType=3" | Select SystemName, DeviceID, VolumeName, size,freespace  | convertto-xml -NoTypeInformation -As String"' 
-$RetDiskSpecs =fnExecuteXMCmdShell  $ServerInstance $GetDiskSpecs
+$RetDiskSpecs =fnExecuteXPCmdShell  $ServerInstance $GetDiskSpecs
 if ($RetDiskSpecs.ExecuteXMCmdShellError.length -eq 0) 
 {
     $RetDiskSpecs1=($RetDiskSpecs.SQLResult.output)
@@ -1064,7 +1068,7 @@ order by SpaceInMB desc
 
 "Collecting Top memory consuming processes from OS" | write-PHLog -echo -Logtype Debug2
     $GetTopMemoryProcesses= 'powershell.exe -c "get-wmiobject WIN32_PROCESS | Sort-Object -Property ws -Descending|select -first 5|Select processname, ws,ProcessID,PageFileUsage,VM,VirtualSize,Handle,ReadTransferCount,ReadOperationCount,MaximumWorkingSetSize,MinimumWorkingSetSize   ,PageFaults,ParentProcessId,PeakPageFileUsage,PeakVirtualSize,PeakWorkingSetSize,Priority,PrivatePageCount,ThreadCount,WorkingSetSize,WriteOperationCount,WriteTransferCount       | ConvertTo-XML -NoTypeInformation -As String"  '
-    $RetTopMemoryProcesses =fnExecuteXMCmdShell  $ServerInstance $GetTopMemoryProcesses
+    $RetTopMemoryProcesses =fnExecuteXPCmdShell  $ServerInstance $GetTopMemoryProcesses
     $RetTopMemoryProcessesresult1=($RetTopMemoryProcesses.SQLResult.output)
     $RetTopMemoryProcessesresult2 =[xml]"$RetTopMemoryProcessesresult1"
     $TopMemoryProcesses=@()
@@ -1298,6 +1302,7 @@ order by record_id desc
     $ObservationsHTML=$Observation  | Select Observations,Priority| ConvertTo-HTML  -head $a  -body $body
     $RetsqlConfigHTMLCombined= $ObservationsHTML+ $KeyServerStats+$RetsqlConfigHTML
 
-"Sending email with all observations" | write-PHLog -echo -Logtype Debug2
+"Sending email with all observations to $EmailSender" | write-PHLog -echo -Logtype Debug2
 $emailSubject=$ServerInstance + ": Server Summary as of - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString()) " 
 fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTMLCombined -emailSubject $emailSubject -HostName $lHostName -smtpserver $smtpserver
+"Script completed" | write-PHLog -echo -Logtype Success

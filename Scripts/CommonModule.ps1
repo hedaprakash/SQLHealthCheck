@@ -138,7 +138,7 @@ function fnExecuteQuery (
 
 
 # Function to execute OS WMI commands via XP_cmdshell and trap errors gracefully
-function fnExecuteXMCmdShell (
+function fnExecuteXPCmdShell (
   [string] $NodeName = $(throw "User Name must be specified."),
   [string] $CommandToExecute = $(throw "User Name must be specified.")
 )
