@@ -1,9 +1,9 @@
 ﻿param (
-    [string]$EmailSender = "sqlfeature@gmail.com",
-    [string]$ServerInstance = "localhost\SQL_2014_STD",
-    [string]$SqlUser = "",
-    [string]$SqlPassword = "",
-    [string]$smtpserver = ""
+    [string]$EmailSender = "sqltest@gmail.com",
+    [string]$ServerInstance = "",
+    [string]$SqlUser = "svcsql",
+    [string]$SqlPassword = "testpass",
+    [string]$smtpserver = "smtp.sqlfeatures.local"
     )
 
 #+-------------------------------------------------------------------+    
@@ -22,6 +22,7 @@
 #|: |03-02-2016 1.3     Prakash Heda  Eamil support added            |
 #|: |06-02-2016 2.0     Prakash Heda  multiple bug fixes             |
 #|: |07-22-2016 2.1     Prakash Heda  multiple bug fixes             |
+#|: |03-31-2017 3.0     Prakash Heda  Enhanced logging and fixes     |
 #|{>\-------------------------------------------------------------/<}|  
 #| = : = : = : = : = : = : = : = : = : = : = : = : = : = : = : = : = |  
 #+-------------------------------------------------------------------+  
@@ -29,68 +30,103 @@
 
 $ScriptDir =  split-path -parent $MyInvocation.MyCommand.Path
 
+    cls
+
+    $readIntent =$true
 # Import common function module
 Import-Module $ScriptDir\CommonModule.ps1
 
-$ErrorActionPreference = "Stop"
-$readIntent =$true
-$Observation=@()
-$lHostName = $ServerInstance
-$Logtime=Get-Date -format "yyyyMMddHHmmss"
-$LogPath= join-path $ScriptDir -childpath "\pslogs"
-if(!(test-path $LogPath)){[IO.Directory]::CreateDirectory($LogPath)}
+    $Logtime=Get-Date -format "yyyyMMddHHmmss"
+    $LogPath= join-path $ScriptDir -ChildPath "pslogs"
+    if(!(test-path $LogPath)){[IO.Directory]::CreateDirectory($LogPath)}
 
-# Update host name if SQL instance is passed
-    if ($ServerInstance.IndexOf("\" )-ne -1)
-    {$lHostName = $ServerInstance.Split('\') | Select-Object -First 1}
+    $ScriptNameWithoutExt=[system.io.path]::GetFilenameWithoutExtension($MyInvocation.MyCommand.Path)
+    $CentralHost=${$env:COMPUTERNAME}
 
-$ExecutionSummaryLogFile=$LogPath + "\" + $lHostName + "_ExecutionSummary_" + $Logtime + ".html"
-
-# get full FQDN if not already passed, this allow support for multiple domains
-Try{
-        if (($lHostName.split(".")| measure).count -eq 1)
-        {
-            $fqdn=(Resolve-DnsName $lHostName -Type A).Name | select -first 1
-            $lHostName=$fqdn
-        }
-    }
-catch
+"Get Host name and Instance name"
+    $SQlInstanceName =$null
+    $FullSQlInstance =$null
+    $lHostNameShort=$null
+    
+    IF (($ServerInstance.split("\")| measure).count -gt 1)
     {
-
-        "Not able to get DNS server name for: $lHostName "| write-PHLog  -echo -Logtype Warning
-        "Try to ping server name to see if its up: $lHostName "| write-PHLog  -echo -Logtype Error
-        $_.exception.message | write-PHLog  -echo -Logtype Debug2
-        $emailSubject=$lHostName + ": Could not resolve server name - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
-        $RetsqlConfigHTML="Pass FQDN for server name"
-        fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "AALLINONEE1" -smtpserver $smtpserver
-        exit
+        $SQlInstanceName = $($ServerInstance.Split('\') | Select-Object -last 1)
+        $lHostName= $($ServerInstance.Split('\') | Select-Object -First 1)
+    }
+    else
+    {
+        $lHostName= $ServerInstance
     }
 
-$ExecutionSummaryLogFile=$LogPath + "\" + $lHostName + "_ExecutionSummary_" + $Logtime + ".html"
-"Starting run for $lHostName"| write-PHLog -echo -Logtype Success
-"ServerInstance: $ServerInstance    HostName: $lHostName "| write-PHLog -echo -Logtype Debug2
-"Execution Log File:  $ExecutionSummaryLogFile "| write-PHLog -echo -Logtype Debug2
+    IF (($lHostName.split(".")| measure).count -gt 1)
+    {
+        $lHostNameShort= $lHostName.trim().Split('.') | Select-Object -first 1
+        $lHostNameFull= $lHostName
+    }
+    else
+    {
+        $lHostNameShort= $lHostName
+    }
 
-"Checking if SQL instance access is working" | write-PHLog -echo -Logtype Debug2
-$queryToCheckSQLAccess="select @@servername as RetServername"
-$RetCheckSQlAccess = fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $queryToCheckSQLAccess
+    Try{
+            if ($lHostNameFull -eq $null)
+            {
+                $fqdn=(Resolve-DnsName $lHostName -Type A).Name | select -first 1
+                $lHostNameFull=$fqdn
+            }
+        }
+    catch
+        {
+            "Not able to get DNS server name for: $lHostName "| write-PHLog  -echo -Logtype Debug2
+            $_.exception.message | write-PHLog  -echo -Logtype Debug2
+            $emailSubject=$lHostName + ": Could not resolve server name - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
+            $RetsqlConfigHTML="Pass FQDN for server name"
+            fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName $CentralHost
+            exit
+        }
+
+    if ($SQlInstanceName -eq $null)
+    {
+        $FullSQlInstance = $lHostNameFull
+    }
+    else
+    {
+        $FullSQlInstance = $lHostNameShort + "\" + $SQlInstanceName 
+    }
+
+    $ExecutionSummaryLogFile=$LogPath + "\" + $lHostNameShort + "_" +$ScriptNameWithoutExt + "_" + $Logtime + ".html"
+
+
+"Starting run for Hostname: $lHostNameFull `n  SQL connection name: $FullSQlInstance"| write-PHLog -Logtype Success
+"`nServerInstance: $ServerInstance `nSQlInstanceName: $SQlInstanceName `nlHostNameShort: $lHostNameShort `nlHostNameFull: $lHostNameFull `nFullSQlInstance: $FullSQlInstance`n" | write-PHLog -Logtype Debug
+
+$Observation=@()
+$AppErrorCollection=@()
+
+$queryToCheckSQLAccess="select @@servername as Servername,@@version as Sqlversion"
+
+
+$RetCheckSQlAccess = fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $queryToCheckSQLAccess
+$RetCheckSQlAccess 
+
 if ($RetCheckSQlAccess.TestSqlAcces -eq $false) 
 {
     $FailedConnection= [pscustomobject] @{
         Hostname=$lHostName
-        ServerInstance=$ServerInstance
-        FailedConnection="Access to DB server: $ServerInstance is not working"
+        ServerInstance=$FullSQlInstance
+        FailedConnection="SQL Access failed for Connection, please try connecting to  $FullSQlInstance manually"
         ErrorMessage=$RetCheckSQlAccess.ExecuteSQLError
         }
     $FailedConnection | write-PHLog -echo -Logtype Warning
     $FailedConnection.ErrorMessage | write-PHLog -echo -Logtype Warning
     "Verify connecting to ServerInstance $($FailedConnection.ServerInstance) manually via SSMS"| write-PHLog -echo -Logtype Error
     "Verify telnet command to check sql port: telnet $lHostName 1433"| write-PHLog -echo -Logtype Error
-    $emailSubject=$ServerInstance + ": Could not connect to SQL instance $ServerInstance - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
+    $emailSubject=$FullSQlInstance + ": Could not connect to SQL instance $FullSQlInstance - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString())" 
     $RetsqlConfigHTML= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTML -emailSubject $emailSubject -HostName "AALLINONEE1" -smtpserver $smtpserver
     exit
 }
+
 
 
 "Collect SQL instnce related information" | write-PHLog -echo -Logtype Debug2
@@ -139,11 +175,21 @@ WHERE session_id = 1
 					THEN 'Full-text is not installed' 
 				WHEN SERVERPROPERTY('IsFullTextInstalled') = NULL 
 					THEN 'Error' END AS IsFullTextInstalled
+            , isnull(serverproperty('IsHadrEnabled'),0) as IsHadrEnabled
+            , (select count(1) from master.sys.database_mirroring_endpoints ) as MirroringEnabled
 
 " 
+	$RetSystemSummary = fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerySystemSummary 
 
-    $RetSystemSummary = fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerySystemSummary 
+if ($RetSystemSummary.TestSqlAcces -eq $true) 
+{
     $RetSystemSummaryResult = $RetSystemSummary.sqlresult
+
+    if (($RetSystemSummaryResult.IsHadrEnabled -eq 0) -or ($RetSystemSummaryResult.MirroringEnabled -ne 0))
+    {
+        $readIntent =$false
+    }
+
 	$RetSystemSummaryResult | Format-Table
     $body="<H2>SQL Summary</H2>" 
     $RetsqlConfigHTML= $RetSystemSummaryResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
@@ -151,57 +197,73 @@ WHERE session_id = 1
 
 
 "Collect processor information" | write-PHLog -echo -Logtype Debug2
-$GetProcessorCount= 'powershell.exe -c "$colItems =Get-WmiObject -class "Win32_Processor" -namespace "root/CIMV2" ;    $NOfLogicalCPU = 0;    foreach ($objcpu in $colItems)    {$NOfLogicalCPU = $NOfLogicalCPU + ($objcpu.NumberOfLogicalProcessors) }; $NOfLogicalCPU "'
-$RetProcessorCount =fnExecuteXPCmdShell  $ServerInstance $GetProcessorCount
-$TotalProcessorCount=$RetProcessorCount.SQLResult.output|out-string
-
+    $GetProcessorCount= 'powershell.exe -c "$colItems =Get-WmiObject -class "Win32_Processor" -namespace "root/CIMV2" ;    $NOfLogicalCPU = 0;    foreach ($objcpu in $colItems)    {$NOfLogicalCPU = $NOfLogicalCPU + ($objcpu.NumberOfLogicalProcessors) }; $NOfLogicalCPU "'
+    $RetProcessorCount =fnExecuteXPCmdShell  $FullSQlInstance $GetProcessorCount
+    if ($RetProcessorCount.ExecuteXMCmdShellError -ne "")
+    {
+        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get powershellprocessor info $lHostName"; ErrorMessage=$RetProcessorCount.ExecuteXMCmdShellError}
+        $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
+    $TotalProcessorCount=$RetProcessorCount.SQLResult.output|out-string
 
 "Collect last boot time" | write-PHLog -echo -Logtype Debug2
-$GetMemorySpecs= 'powershell.exe -c "Get-WmiObject Win32_OperatingSystem | select csname,lastbootuptime,TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-XML -NoTypeInformation -As String"  '
-$RetMemorySpecs =fnExecuteXPCmdShell  $ServerInstance $GetMemorySpecs
-$RetMemorySpecsresult1=($RetMemorySpecs.SQLResult.output)
-$RetMemorySpecsresult2 =[xml]"$RetMemorySpecsresult1 "
-$LastBootTime=$RetMemorySpecsresult2.objects.object.SelectSingleNode('Property[@Name="lastbootuptime"]').innerxml
-$Boot=Get-WmiObject win32_operatingsystem
-$Boot.ConvertToDateTime($LastBootTime)
+    $GetMemorySpecs= 'powershell.exe -c "Get-WmiObject Win32_OperatingSystem | select csname,lastbootuptime,TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-XML -NoTypeInformation -As String"  '
+    $RetMemorySpecs =fnExecuteXPCmdShell  $FullSQlInstance $GetMemorySpecs
+    $RetMemorySpecsresult1=($RetMemorySpecs.SQLResult.output)
+    if (($RetMemorySpecs.ExecuteXMCmdShellError -ne "") -and ($RetMemorySpecs.ExecuteXMCmdShellError.length -ne 0))
+    {
+        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get OS info $lHostName"; ErrorMessage=$RetMemorySpecs.ExecuteXMCmdShellError}
+        $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
+    else 
+    {
+        $RetMemorySpecsresult2 =[xml]"$RetMemorySpecsresult1 "
+        $LastBootTime=$RetMemorySpecsresult2.objects.object.SelectSingleNode('Property[@Name="lastbootuptime"]').innerxml
+        $LastBootTime
+        $Boot=Get-WmiObject win32_operatingsystem
+        $Boot.ConvertToDateTime($LastBootTime)
+    }
+
 
 "Collect OS related details" | write-PHLog -echo -Logtype Debug2
-$GetServerSpecs= 'powershell.exe -c "Get-WmiObject Win32_ComputerSystem | select Name,Model, Manufacturer, Description, DNSHostName,Domain, DomainRole, PartOfDomain, NumberOfProcessors,NumberOfLogicalProcessors,SystemType, TotalPhysicalMemory, UserName,Workgroup,CurrentTimeZone | ConvertTo-XML -NoTypeInformation -As String" '
-$RetServerSpecs =fnExecuteXPCmdShell  $ServerInstance $GetServerSpecs
+    $GetServerSpecs= 'powershell.exe -c "Get-WmiObject Win32_ComputerSystem | select Name,Model, Manufacturer, Description, DNSHostName,Domain, DomainRole, PartOfDomain, NumberOfProcessors,NumberOfLogicalProcessors,SystemType, TotalPhysicalMemory, UserName,Workgroup,CurrentTimeZone | ConvertTo-XML -NoTypeInformation -As String" '
+    $RetServerSpecs =fnExecuteXPCmdShell  $FullSQlInstance $GetServerSpecs
 
 "Convert XML output to PS object" | write-PHLog -echo -Logtype Debug2
-if ($RetServerSpecs.ExecuteXMCmdShellError.length -eq 0) 
-{
-    $RetServerSpecsresult1=($RetServerSpecs.SQLResult.output)
-    $RetServerSpecsresult2 =[xml]"$RetServerSpecsresult1 "
-    #$RetServerSpecsresult2.InnerXml 
-    $RetServerSpecsresult3=$RetServerSpecsresult2.objects.object| foreach {
-        [pscustomobject]  @{
-        Name=($_.SelectSingleNode('Property[@Name="Name"]').innerxml)
-        Model=($_.SelectSingleNode('Property[@Name="Model"]').innerxml)
-        Manufacturer=($_.SelectSingleNode('Property[@Name="Manufacturer"]').innerxml)
-        Description=($_.SelectSingleNode('Property[@Name="Description"]').innerxml)
-        DNSHostName=($_.SelectSingleNode('Property[@Name="DNSHostName"]').innerxml)
-        Domain=($_.SelectSingleNode('Property[@Name="Domain"]').innerxml)
-        DomainRole=($_.SelectSingleNode('Property[@Name="DomainRole"]').innerxml)
-        PartOfDomain=($_.SelectSingleNode('Property[@Name="PartOfDomain"]').innerxml)
-        NumberOfSocket=($_.SelectSingleNode('Property[@Name="NumberOfProcessors"]').innerxml)
-        TotalProcessorCount=$TotalProcessorCount
-        NumberOfLogicalProcessors=($_.SelectSingleNode('Property[@Name="NumberOfLogicalProcessors"]').innerxml)
-        SystemType=($_.SelectSingleNode('Property[@Name="SystemType"]').innerxml)
-        TotalPhysicalMemory=$([math]::round(((($_.SelectSingleNode('Property[@Name="TotalPhysicalMemory"]').innerxml)/1GB)),2))  
-        FreePhysicalMemory=$([math]::round(((($RetMemorySpecsresult2.objects.object.SelectSingleNode('Property[@Name="FreePhysicalMemory"]').innerxml))/(1024*1024)),1)) 
-        UserName=($_.SelectSingleNode('Property[@Name="UserName"]').innerxml)
-        Workgroup=($_.SelectSingleNode('Property[@Name="Workgroup"]').innerxml)
-        CurrentTimeZone=($_.SelectSingleNode('Property[@Name="CurrentTimeZone"]').innerxml)
-       }
-}
+    if ($RetServerSpecs.ExecuteXMCmdShellError.length -eq 0) 
+    {
+        $RetServerSpecsresult1=($RetServerSpecs.SQLResult.output)
+        $RetServerSpecsresult2 =[xml]"$RetServerSpecsresult1 "
+        #$RetServerSpecsresult2.InnerXml 
+        $RetServerSpecsresult3=$RetServerSpecsresult2.objects.object| foreach {
+            [pscustomobject]  @{
+            Name=($_.SelectSingleNode('Property[@Name="Name"]').innerxml)
+            Model=($_.SelectSingleNode('Property[@Name="Model"]').innerxml)
+            Manufacturer=($_.SelectSingleNode('Property[@Name="Manufacturer"]').innerxml)
+            Description=($_.SelectSingleNode('Property[@Name="Description"]').innerxml)
+            DNSHostName=($_.SelectSingleNode('Property[@Name="DNSHostName"]').innerxml)
+            Domain=($_.SelectSingleNode('Property[@Name="Domain"]').innerxml)
+            DomainRole=($_.SelectSingleNode('Property[@Name="DomainRole"]').innerxml)
+            PartOfDomain=($_.SelectSingleNode('Property[@Name="PartOfDomain"]').innerxml)
+            NumberOfSocket=($_.SelectSingleNode('Property[@Name="NumberOfProcessors"]').innerxml)
+            TotalProcessorCount=$TotalProcessorCount
+            NumberOfLogicalProcessors=($_.SelectSingleNode('Property[@Name="NumberOfLogicalProcessors"]').innerxml)
+            SystemType=($_.SelectSingleNode('Property[@Name="SystemType"]').innerxml)
+            TotalPhysicalMemory=$([math]::round(((($_.SelectSingleNode('Property[@Name="TotalPhysicalMemory"]').innerxml)/1GB)),2))  
+            FreePhysicalMemory=$([math]::round(((($RetMemorySpecsresult2.objects.object.SelectSingleNode('Property[@Name="FreePhysicalMemory"]').innerxml))/(1024*1024)),1)) 
+            UserName=($_.SelectSingleNode('Property[@Name="UserName"]').innerxml)
+            Workgroup=($_.SelectSingleNode('Property[@Name="Workgroup"]').innerxml)
+            CurrentTimeZone=($_.SelectSingleNode('Property[@Name="CurrentTimeZone"]').innerxml)
+           }
+    }
 
 
     $RetServerSpecsresult3 | Format-Table
+    
     $body="<H2>Computer Summary</H2>" 
     $RetsqlConfigHTML+= $RetServerSpecsresult3 |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
 }
+
 
 "Collect SQL key performance couters averaging last 1 min" | write-PHLog -echo -Logtype Debug2
 $QueryDB_PerfCounter= 
@@ -322,12 +384,13 @@ DROP TABLE #perf_counters_second
 
 
 " 
-
-	$RetQueryDB_PerfCounter= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_PerfCounter
+	$RetQueryDB_PerfCounter= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QueryDB_PerfCounter
     $RetQueryDB_PerfCounterResult = $RetQueryDB_PerfCounter.sqlresult
 	$RetQueryDB_PerfCounterResult | Format-Table
     $body="<H2>Database perf counters</H2>" 
     $RetsqlConfigHTML+= $RetQueryDB_PerfCounterResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+
+
 
 
 "Collect SQL wait Stats summary" | write-PHLog -echo -Logtype Debug2
@@ -415,15 +478,16 @@ select * from tempdb..tmpWaitStats
 
 
 " 
-	$RetQueryDB_WaitStats= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_WaitStats
+	$RetQueryDB_WaitStats= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QueryDB_WaitStats
     $RetQueryDB_WaitStatsResult = $RetQueryDB_WaitStats.sqlresult
 	$RetQueryDB_WaitStatsResult | Format-Table
     $body="<H2>Database Wait Stats</H2>" 
     $RetsqlConfigHTML+= $RetQueryDB_WaitStatsResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
 
+
 "Collect SQL OS waits from sys.dm_os_waiting_tasks" | write-PHLog -echo -Logtype Debug2
     $QueryDB_WaitTasks="select * from tempdb..tmpWaitTasks"
-	$RetQueryDB_WaitTasks= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QueryDB_WaitTasks
+	$RetQueryDB_WaitTasks= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QueryDB_WaitTasks
     $RetQueryDB_WaitTasksResult = $RetQueryDB_WaitTasks.sqlresult
 	$RetQueryDB_WaitTasksResult | Format-Table
     $body="<H2>OS Wait Tasks</H2>" 
@@ -504,12 +568,11 @@ $Querysp_configure=
     )
 
 " 
-	$RetQuerysp_configure= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $Querysp_configure
+	$RetQuerysp_configure= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $Querysp_configure
     $RetQuerysp_configureResult = $RetQuerysp_configure.sqlresult
 	$RetQuerysp_configureResult | Format-Table
     $body="<H2>Database configuration</H2>" 
     $RetsqlConfigHTML+= $RetQuerysp_configureResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
-
 
 "Collecting Database IO latency summary since SQL restart" | write-PHLog -echo -Logtype Debug2
 $QuerydatabaseIOLatency= 
@@ -597,12 +660,12 @@ $QuerydatabaseIOLatency=
 " 
 if ($readIntent -eq $true)
 {
-	$RetatabaseIOLatency= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseIOLatency -ReadIntentTrue $readIntent
-    $RetatabaseIOLatency= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..DiskLatency order by Latency desc"
+	$RetatabaseIOLatency= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseIOLatency -ReadIntentTrue $readIntent
+    $RetatabaseIOLatency= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  "select * from tempdb..DiskLatency order by Latency desc"
 }
 else
 {
-    $RetatabaseIOLatency= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseIOLatency
+    $RetatabaseIOLatency= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseIOLatency
 }
     $RetatabaseIOLatencyResult = $RetatabaseIOLatency.sqlresult
 	$RetatabaseIOLatencyResult | Format-Table
@@ -612,12 +675,14 @@ else
 
 
 "Collecting OS Disk Stats" | write-PHLog -echo -Logtype Debug2
-$GetDiskSpecs= 'powershell.exe -c "Get-WmiObject Win32_LogicalDisk -filter "DriveType=3" | Select SystemName, DeviceID, VolumeName, size,freespace  | convertto-xml -NoTypeInformation -As String"' 
-$RetDiskSpecs =fnExecuteXPCmdShell  $ServerInstance $GetDiskSpecs
-if ($RetDiskSpecs.ExecuteXMCmdShellError.length -eq 0) 
-{
+    $GetDiskSpecs= 'powershell.exe -c "Get-WmiObject Win32_LogicalDisk -filter "DriveType=3" | Select SystemName, DeviceID, VolumeName, size,freespace  | convertto-xml -NoTypeInformation -As String"' 
+
+    $RetDiskSpecs =fnExecuteXPCmdShell  $FullSQlInstance $GetDiskSpecs
+    if ($RetDiskSpecs.ExecuteXMCmdShellError.length -eq 0) 
+    {
     $RetDiskSpecs1=($RetDiskSpecs.SQLResult.output)
     $RetDiskSpecs2 =[xml]"$RetDiskSpecs1 "
+    #$RetDiskSpecs2.InnerXml 
     $RetDiskSpecs3=$RetDiskSpecs2.objects.object | foreach {
         [pscustomobject]  @{
         SystemName=($_.SelectSingleNode('Property[@Name="SystemName"]').innerxml)
@@ -629,11 +694,10 @@ if ($RetDiskSpecs.ExecuteXMCmdShellError.length -eq 0)
         DiskFreePercentage=$([math]::round($([math]::round(((($_.SelectSingleNode('Property[@Name="freespace"]').innerxml))/1GB),2)*100) / $([math]::round(((($_.SelectSingleNode('Property[@Name="size"]').innerxml))/1GB),2))))
         }
     } 
-    $RetDiskSpecs3 | ft
-    $body="<H2>Disk State</H2>" 
-    $RetsqlConfigHTML+= $RetDiskSpecs3 |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
-}
-
+        $RetDiskSpecs3 | ft
+        $body="<H2>Disk State</H2>" 
+        $RetsqlConfigHTML+= $RetDiskSpecs3 |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
 
 
 "Collecting Database Disk Usage Summary" | write-PHLog -echo -Logtype Debug2
@@ -755,17 +819,26 @@ select * from tempdb..tmpphdatabaseUsageSummary
 -- FROM sys.master_files as mf
 
 " 
-if ($readIntent -eq $true)
-{
-	$RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsageSummary -ReadIntentTrue $readIntent
-    $RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseUsageSummary"
-}
-else
-{
-    $RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsageSummary
-}
+    if ($readIntent -eq $true)
+    {
+	    $RetdatabaseUsageSummary1= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseUsageSummary -ReadIntentTrue $readIntent
+        if ($RetdatabaseUsageSummary1.ExecuteSQLError -ne "")
+        {
+            $FailedConnection= [pscustomobject] @{FailedConnection="Could not collect database usage summary $lHostName"; ErrorMessage=$RetdatabaseUsageSummary1.ExecuteSQLError}
+            $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+        }
+        else 
+        {
+            $RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  "select * from tempdb..tmpphdatabaseUsageSummary"
+        }
+    }
+    else
+    {
+        $RetdatabaseUsageSummary= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseUsageSummary
+    }
     $RetdatabaseUsageSummaryResult = $RetdatabaseUsageSummary.sqlresult
 	$RetdatabaseUsageSummaryResult | Format-Table
+
 
 "Summarizing Disk Stats with OS disk and Database files for free space" | write-PHLog -echo -Logtype Debug2
     $DiskStatsSummarized=@()
@@ -786,9 +859,12 @@ else
             DiskFreePercentage=$MatchDiskStats.DiskFreePercentage
         }
         $DiskStatsSummarized+=$DiskStatsNew
-    }
 
-	$DiskStatsSummarized | select ServerName,Drive,FileType,DiskSize,DiskUsedSpace,DiskFreespace,DiskFreePercentage,DBFileSizeGB,DBFileSpaceUsedGB,DBFileFreeSpaceGB,DBFreePercentage
+    }
+    $DiskStatsSummarized | select ServerName,Drive,FileType,DiskSize,DiskUsedSpace,DiskFreespace,DiskFreePercentage,DBFileSizeGB,DBFileSpaceUsedGB,DBFileFreeSpaceGB,DBFreePercentage
+
+
+
 
 "Collecting Database growth in last 2 days" | write-PHLog -echo -Logtype Debug2
 $QuerydatabaseGrowth= 
@@ -857,15 +933,17 @@ select * from tempdb..tmpphdatabaseGrowth
 
 
 " 
-if ($readIntent -eq $true)
-{
-	$RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseGrowth -ReadIntentTrue $readIntent
-    $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseGrowth"
-}
-else
-{
-    $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseGrowth 
-}
+
+    if ($readIntent -eq $true)
+    {
+	    $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseGrowth -ReadIntentTrue $readIntent
+        $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  "select * from tempdb..tmpphdatabaseGrowth"
+    }
+    else
+    {
+        $RetQuerydatabaseGrowth= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseGrowth 
+    }
+
 	
     $RetQuerydatabaseGrowthResult = $RetQuerydatabaseGrowth.sqlresult
 	$RetQuerydatabaseGrowthResult | Format-Table
@@ -962,7 +1040,8 @@ SELECT
    ServerName,  
    DatabaseName,  
    FileType,
-   left((physicalFileName),(len(physicalFileName)-charindex('\',reverse(physicalFileName)))) as FolderLocation,
+--   left((physicalFileName),(len(physicalFileName)-charindex('\',reverse(physicalFileName)))) as FolderLocation,
+   physicalFileName as FileLocation,
    FileSizeMB as FileSizeMB,  
    FileSizeMB - FreeSpaceMB as FileSpaceUsedMB,  
    FreeSpaceMB as FreeSpaceMB,
@@ -980,15 +1059,15 @@ order by DatabaseSize desc,DatabaseName,FileType desc
 
 " 
 
-if ($readIntent -eq $true)
-{
-	$RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsage -ReadIntentTrue $readIntent
-    $RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query "select * from tempdb..tmpphdatabaseUsage order by DatabaseSize desc"
-}
-else
-{
-	$RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseUsage }
-
+    if ($readIntent -eq $true)
+    {
+	    $RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseUsage -ReadIntentTrue $readIntent
+        $RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  "select * from tempdb..tmpphdatabaseUsage order by DatabaseSize desc"
+    }
+    else
+    {
+	    $RetQuerydatabaseUsage= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseUsage 
+    }
 
     $RetQuerydatabaseUsageResult = $RetQuerydatabaseUsage.sqlresult
 	$RetQuerydatabaseUsageResult | Format-Table
@@ -996,6 +1075,8 @@ else
     $Sort1 = @{Expression='DatabaseSize'; Descending=$true }
     $Sort2 = @{Expression='FileType'; Descending=$true }
     $RetsqlConfigHTML+= $RetQuerydatabaseUsageResult | Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors | Sort-Object $Sort1, $Sort2 | ConvertTo-HTML  -head $a  -body $body 
+
+
 
 "Collecting Top space consuming Tables for the instance" | write-PHLog -echo -Logtype Debug2
 $QuerydatabaseTopTables= 
@@ -1006,93 +1087,160 @@ use tempdb
 go
 if object_id('tempdb..Table_Row_Counts') is not null drop table tempdb..Table_Row_Counts
 go
-CREATe TABLE Table_Row_Counts(
+CREATe TABLE tempdb..Table_Row_Counts(
+tblschema  varchar (200),
 Table_name varchar (200),
 No_Of_rows varchar (200),
-Reserved_Space varchar (200),
-dataSpace varchar (200),
-index_size varchar (200),
-unused varchar (200)
+SpaceInMB varchar (200),
+data_MB varchar (200),
+index_size_MB varchar (200),
+unused_MB varchar (200)
 )
 GO
+
 if object_id('tempdb..All_DB_Table_Row_Counts') is not null drop table tempdb..All_DB_Table_Row_Counts
 go
-CREATe TABLE All_DB_Table_Row_Counts(
+CREATe TABLE tempdb..All_DB_Table_Row_Counts(
 dbname varchar (200),
+tblschema  varchar (200),
 Table_name varchar (200),
 No_Of_rows bigint,
 SpaceInMB bigint,
-dataSpace varchar (200),
-index_size varchar (200),
-unused varchar (200)
+data_MB varchar (200),
+index_size_MB varchar (200),
+unused_MB varchar (200)
 )
 GO
 declare @command1 varchar(8000)
-
 select @command1 = 
 
 '
-IF ''@'' <> ''master'' AND ''@'' <> ''model'' AND ''@'' <> ''msdb'' AND ''@'' <> ''tempdb'' AND ''@'' <> ''dbastyyuff'' AND ''@'' <> ''test'' AND ''@'' <> ''SharePoint_AdminContent_bc1148e8-7066-4104-9f2f-8707b885ab8b''
+IF ''@'' <> ''master'' AND ''@'' <> ''model'' AND ''@'' <> ''msdb'' AND ''@'' <> ''tempdb'' AND ''@'' <> ''dbastuff'' AND ''@'' <> ''test'' AND ''@'' <> ''SharePoint_AdminContent_bc1148e8-7066-4104-9f2f-8707b885ab8b''
 begin
-	--use [@] execute sp_MSForEachTable ''print ''''?'''' '' 
 
-truncate table Table_Row_Counts
+truncate table tempdb..Table_Row_Counts
+
+
+
 		INSERT INTO tempdb..Table_Row_Counts
-		EXEC [@]..sp_MSforeachtable "sp_spaceused  ''?''"
+		SELECT
+			t3.name AS [schema]
+			,t2.name AS [table]
+			,t1.rows AS row_count
+			,((t1.reserved + ISNULL(a4.reserved,0))* 8) / 1024 AS SpaceInMB 
+			,(t1.data * 8) / 1024 AS data_MB
+			,((CASE WHEN (t1.used + ISNULL(a4.used,0)) > t1.data THEN (t1.used + ISNULL(a4.used,0)) - t1.data ELSE 0 END) * 8) /1024 AS index_size_MB
+			,((CASE WHEN (t1.reserved + ISNULL(a4.reserved,0)) > t1.used THEN (t1.reserved + ISNULL(a4.reserved,0)) - t1.used ELSE 0 END) * 8)/1024 AS unused_MB
+		FROM
+		 (SELECT 
+			 ps.object_id
+			,SUM (CASE WHEN (ps.index_id < 2) THEN row_count ELSE 0 END) AS [rows]
+			,SUM (ps.reserved_page_count) AS reserved
+			,SUM (CASE WHEN (ps.index_id < 2) THEN (ps.in_row_data_page_count + ps.lob_used_page_count + ps.row_overflow_used_page_count) ELSE (ps.lob_used_page_count + ps.row_overflow_used_page_count) END) AS data
+			,SUM (ps.used_page_count) AS used
+		  FROM [@].sys.dm_db_partition_stats ps
+		  GROUP BY ps.object_id) AS t1
+		LEFT OUTER JOIN 
+		 (SELECT 
+			   it.parent_id
+			  ,SUM(ps.reserved_page_count) AS reserved
+			  ,SUM(ps.used_page_count) AS used
+		  FROM [@].sys.dm_db_partition_stats ps
+		  INNER JOIN [@].sys.internal_tables it ON (it.object_id = ps.object_id) WHERE it.internal_type IN (202,204)
+		  GROUP BY it.parent_id) AS a4 ON (a4.parent_id = t1.object_id)
+		INNER JOIN [@].sys.all_objects t2  ON ( t1.object_id = t2.object_id) 
+		INNER JOIN [@].sys.schemas t3 ON (t2.schema_id = t3.schema_id)
+		WHERE t2.type <> ''S'' and t2.type <> ''IT''
 
---select * from @..sysobjects where cr_date < 
 
-		insert into All_DB_Table_Row_Counts
-		select ''@'',Table_name,convert(bigint,(no_of_rows)),convert(bigint,(left(Reserved_Space,len(Reserved_Space)-3))/1024),dataSpace,index_size,unused from Table_Row_Counts
-		
 
+		insert into tempdb..All_DB_Table_Row_Counts
+		select ''@'',tblschema,Table_name,No_Of_rows,SpaceInMB,data_MB,index_size_MB,unused_MB from tempdb..Table_Row_Counts
 end	
 	'
 --select @command1	
 exec sp_MSforeachdb @command1, '@'
 
 select top 10 
-	dbname as 'Database',Table_name as 'TableName',No_Of_rows as [Row Count],SpaceInMB as [Total Space MB],dataSpace,index_size,unused
+	dbname as 'Database',Table_name as 'TableName',No_Of_rows as [Row Count],SpaceInMB as [Total Space MB],data_MB,index_size_MB,unused_MB
 from tempdb..All_DB_Table_Row_Counts
 order by SpaceInMB desc
 
-
 "@
  
-	$RetQuerydatabaseTopTables= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseTopTables
+	$RetQuerydatabaseTopTables= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseTopTables
     $RetQuerydatabaseTopTablesResult = $RetQuerydatabaseTopTables.sqlresult
 	$RetQuerydatabaseTopTablesResult | Format-Table
     $body="<H2>Database Top tables </H2>" 
     $RetsqlConfigHTML+= $RetQuerydatabaseTopTablesResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
 
 
+"Collecting top database memory consumption" | write-PHLog -echo -Logtype Debug2
+$QueryMemoryConsumptionByDB= 
+@"
+set nocount on
+go
+SELECT
+    (CASE WHEN ([database_id] = 32767)
+        THEN N'Resource Database'
+        ELSE DB_NAME ([database_id]) END) AS [DatabaseName],
+    COUNT (*) * 8 / 1024 AS [MBUsed],
+    SUM (CAST ([free_space_in_bytes] AS BIGINT)) / (1024 * 1024) AS [MBEmpty]
+FROM sys.dm_os_buffer_descriptors
+GROUP BY [database_id]
+order by MBUsed desc
+GO
+
+"@
+ 
+	$RetQueryMemoryConsumptionByDB= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QueryMemoryConsumptionByDB
+    $RetQueryMemoryConsumptionByDBResult = $RetQueryMemoryConsumptionByDB.sqlresult
+	$RetQueryMemoryConsumptionByDBResult | Format-Table
+    $body="<H2>Database memory consumption</H2>" 
+    $RetsqlConfigHTML+= $RetQueryMemoryConsumptionByDBResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+
+
 "Collecting Top memory consuming processes from OS" | write-PHLog -echo -Logtype Debug2
     $GetTopMemoryProcesses= 'powershell.exe -c "get-wmiobject WIN32_PROCESS | Sort-Object -Property ws -Descending|select -first 5|Select processname, ws,ProcessID,PageFileUsage,VM,VirtualSize,Handle,ReadTransferCount,ReadOperationCount,MaximumWorkingSetSize,MinimumWorkingSetSize   ,PageFaults,ParentProcessId,PeakPageFileUsage,PeakVirtualSize,PeakWorkingSetSize,Priority,PrivatePageCount,ThreadCount,WorkingSetSize,WriteOperationCount,WriteTransferCount       | ConvertTo-XML -NoTypeInformation -As String"  '
-    $RetTopMemoryProcesses =fnExecuteXPCmdShell  $ServerInstance $GetTopMemoryProcesses
-    $RetTopMemoryProcessesresult1=($RetTopMemoryProcesses.SQLResult.output)
-    $RetTopMemoryProcessesresult2 =[xml]"$RetTopMemoryProcessesresult1"
-    $TopMemoryProcesses=@()
-    $RetTopMemoryProcessesresult2.Objects.Object| foreach {
-        $TopMemoryProcesses+=[pscustomobject]  @{
-        ProcessName=($_.SelectSingleNode('Property[@Name="ProcessName"]').innerxml)
-        WS=$([math]::round(((($_.SelectSingleNode('Property[@Name="WS"]').innerxml)/1MB))))  
-        ProcessID=($_.SelectSingleNode('Property[@Name="ProcessID"]').innerxml)
-        PageFileUsage=$([math]::round(((($_.SelectSingleNode('Property[@Name="PageFileUsage"]').innerxml)/1MB))))  
-        VirtualSize=$([math]::round(((($_.SelectSingleNode('Property[@Name="VM"]').innerxml)/1MB))))  
-        ReadTransferCount=($_.SelectSingleNode('Property[@Name="ReadTransferCount"]').innerxml)
-        ReadOperationCount=($_.SelectSingleNode('Property[@Name="ReadOperationCount"]').innerxml)
-        WriteOperationCount=($_.SelectSingleNode('Property[@Name="WriteOperationCount"]').innerxml)
-        WriteTransferCount=($_.SelectSingleNode('Property[@Name="WriteTransferCount"]').innerxml)
-        ThreadCount=($_.SelectSingleNode('Property[@Name="ThreadCount"]').innerxml)
-        WorkingSetSize=($_.SelectSingleNode('Property[@Name="WorkingSetSize"]').innerxml)
-        Priority=($_.SelectSingleNode('Property[@Name="Priority"]').innerxml)
-        ParentProcessId=($_.SelectSingleNode('Property[@Name="ParentProcessId"]').innerxml)
-        PageFaults=($_.SelectSingleNode('Property[@Name="PageFaults"]').innerxml)
-        }
+    $RetTopMemoryProcesses =fnExecuteXPCmdShell  $FullSQlInstance $GetTopMemoryProcesses
+    if ($RetTopMemoryProcesses.ExecuteXMCmdShellError -ne "")
+    {
+        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get WIN32_PROCESS WMI data  $lHostName"; ErrorMessage=$RetTopMemoryProcesses.ExecuteXMCmdShellError}
+        $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     }
-    $TopMemoryProcesses| select ProcessName,WS,VirtualSize,PageFileUsage,ProcessID,ReadTransferCount
-    $body="<H2>Top Memory consuming processes</H2>" 
-    $RetsqlConfigHTML+= $TopMemoryProcesses |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    else
+    {
+        $RetTopMemoryProcessesresult1=($RetTopMemoryProcesses.SQLResult.output)
+        $RetTopMemoryProcessesresult2 =[xml]"$RetTopMemoryProcessesresult1"
+        $TopMemoryProcesses=@()
+        $RetTopMemoryProcessesresult2.Objects.Object| foreach {
+            $TopMemoryProcesses+=[pscustomobject]  @{
+            ProcessName=($_.SelectSingleNode('Property[@Name="ProcessName"]').innerxml)
+            WS=$([math]::round(((($_.SelectSingleNode('Property[@Name="WS"]').innerxml)/1MB))))  
+            ProcessID=($_.SelectSingleNode('Property[@Name="ProcessID"]').innerxml)
+            PageFileUsage=$([math]::round(((($_.SelectSingleNode('Property[@Name="PageFileUsage"]').innerxml)/1MB))))  
+            VirtualSize=$([math]::round(((($_.SelectSingleNode('Property[@Name="VM"]').innerxml)/1MB))))  
+            ReadTransferCount=($_.SelectSingleNode('Property[@Name="ReadTransferCount"]').innerxml)
+            ReadOperationCount=($_.SelectSingleNode('Property[@Name="ReadOperationCount"]').innerxml)
+            WriteOperationCount=($_.SelectSingleNode('Property[@Name="WriteOperationCount"]').innerxml)
+            WriteTransferCount=($_.SelectSingleNode('Property[@Name="WriteTransferCount"]').innerxml)
+            ThreadCount=($_.SelectSingleNode('Property[@Name="ThreadCount"]').innerxml)
+            WorkingSetSize=($_.SelectSingleNode('Property[@Name="WorkingSetSize"]').innerxml)
+            Priority=($_.SelectSingleNode('Property[@Name="Priority"]').innerxml)
+            ParentProcessId=($_.SelectSingleNode('Property[@Name="ParentProcessId"]').innerxml)
+            PageFaults=($_.SelectSingleNode('Property[@Name="PageFaults"]').innerxml)
+            }
+        }
+
+        $TopMemoryProcesses| select ProcessName,WS,VirtualSize,PageFileUsage,ProcessID,ReadTransferCount
+
+        $body="<H2>Top Memory consuming processes</H2>" 
+        $RetsqlConfigHTML+= $TopMemoryProcesses |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
+
+
+
+
 
 
 "Collecting OS CPU usage from sys.dm_os_ring_buffers" | write-PHLog -echo -Logtype Debug2
@@ -1137,125 +1285,155 @@ order by record_id desc
 
 
 " 
-	$RetQuerydatabaseCPUUsage= fnExecuteQuery -ServerInstance $ServerInstance -Database "master" -Query $QuerydatabaseCPUUsage
+	$RetQuerydatabaseCPUUsage= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseCPUUsage
     $RetQuerydatabaseCPUUsageResult = $RetQuerydatabaseCPUUsage.sqlresult
 	$RetQuerydatabaseCPUUsageResult | Format-Table
     $body="<H2>Database CPu Usage </H2>" 
     $RetsqlConfigHTML+= $RetQuerydatabaseCPUUsageResult |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
 
 
+    Try{
+        $ActivityName="Preparing data for OS and SQL Server uptime"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        $Machine_UpTime = (Get-Date) - $RetSystemSummaryResult.Machine_UpTime
+        $Machine_UpTime_Display = "Uptime: " + $Machine_UpTime.Days + " days, " + $Machine_UpTime.Hours + " hours, " + $Machine_UpTime.Minutes + " minutes" 
+        $SQLServer_UpTime = (Get-Date) - $RetSystemSummaryResult.SQLServer_UpTime
+        $SQLServer_UpTime_Display = "Uptime: " + $SQLServer_UpTime.Days + " days, " + $SQLServer_UpTime.Hours + " hours, " + $SQLServer_UpTime.Minutes + " minutes" 
 
-"Preparing data for OS and SQL Server uptime" | write-PHLog -echo -Logtype Debug2
-    $Machine_UpTime = (Get-Date) - $RetSystemSummaryResult.Machine_UpTime
-    $Machine_UpTime_Display = "Uptime: " + $Machine_UpTime.Days + " days, " + $Machine_UpTime.Hours + " hours, " + $Machine_UpTime.Minutes + " minutes" 
-    $SQLServer_UpTime = (Get-Date) - $RetSystemSummaryResult.SQLServer_UpTime
-    $SQLServer_UpTime_Display = "Uptime: " + $SQLServer_UpTime.Days + " days, " + $SQLServer_UpTime.Hours + " hours, " + $SQLServer_UpTime.Minutes + " minutes" 
+        $ActivityName="Preparing highest Read/Write latency stats"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        $ReadLatency=($RetatabaseIOLatencyResult| Sort-Object ReadLatency -descending | select -First 1 ).ReadLatency
+        $WriteLatency=($RetatabaseIOLatencyResult| Sort-Object WriteLatency -descending | select -First 1).WriteLatency
+        $Latency=($RetatabaseIOLatencyResult| Sort-Object Latency -descending | select -First 1).Latency
 
-"Preparing highest Read/Write latency stats" | write-PHLog -echo -Logtype Debug2
-    $ReadLatency=($RetatabaseIOLatencyResult| Sort-Object ReadLatency -descending | select -First 1 ).ReadLatency
-    $WriteLatency=($RetatabaseIOLatencyResult| Sort-Object WriteLatency -descending | select -First 1).WriteLatency
-    $Latency=($RetatabaseIOLatencyResult| Sort-Object Latency -descending | select -First 1).Latency
+        $ActivityName="Consolidating SQL server stats for Observations"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        $Servercheck=[pscustomobject]  @{
+            Name=$RetSystemSummaryResult.ComputerNamePhysicalNetBIOS
+            Machine_UpTime=$Machine_UpTime_Display
+            SQLServer_UpTime=$SQLServer_UpTime_Display
+            TotalPhysicalMemory=$RetServerSpecsresult3.TotalPhysicalMemory
+            FreePhysicalMemory=$RetServerSpecsresult3.FreePhysicalMemory
+            NumberOfLogicalProcessors=$RetServerSpecsresult3.NumberOfLogicalProcessors
+            PLE =($RetQueryDB_PerfCounterResult | where-object {$_.counter_name -match 'Page life expectancy'} | select cntr_value).cntr_value
+            MinMem=($RetQuerysp_configureResult | where-object {$_.name -match "min server memory"} ).run_value
+            MaxMem=($RetQuerysp_configureResult | where-object {$_.name -match "max server memory"} ).run_value
+            ReadLatency=$ReadLatency
+            WriteLatency=$WriteLatency
+            Latency=$Latency
+        }
 
-"Consolidating SQL server stats for Observations" | write-PHLog -echo -Logtype Debug2
-    $Servercheck=[pscustomobject]  @{
-        Name=$RetSystemSummaryResult.ComputerNamePhysicalNetBIOS
-        Machine_UpTime=$Machine_UpTime_Display
-        SQLServer_UpTime=$SQLServer_UpTime_Display
-        TotalPhysicalMemory=$RetServerSpecsresult3.TotalPhysicalMemory
-        FreePhysicalMemory=$RetServerSpecsresult3.FreePhysicalMemory
-        NumberOfLogicalProcessors=$RetServerSpecsresult3.NumberOfLogicalProcessors
-        PLE =($RetQueryDB_PerfCounterResult | where-object {$_.counter_name -match 'Page life expectancy'} | select cntr_value).cntr_value
-        MinMem=($RetQuerysp_configureResult | where-object {$_.name -match "min server memory"} ).run_value
-        MaxMem=($RetQuerysp_configureResult | where-object {$_.name -match "max server memory"} ).run_value
-        ReadLatency=$ReadLatency
-        WriteLatency=$WriteLatency
-        Latency=$Latency
+        $ActivityName="Checking if Disk Latency to be reported in observations"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        if (($Servercheck.ReadLatency -gt 200) -And ($Servercheck.ReadLatency -lt 300))
+        {$Observation+=[pscustomobject]  @{Observations="DB Read latency is high: $($Servercheck.ReadLatency), pleaes check are top database and queries causing it"; Priority="Low"}}
+        Elseif (($Servercheck.ReadLatency -gt 300))
+        {$Observation+=[pscustomobject]  @{Observations="DB Read latency is high: $($Servercheck.ReadLatency), pleaes check are top database and queries causing it"; Priority="Low"}}
+
+        if (($Servercheck.WriteLatency -gt 100) -And ($Servercheck.WriteLatency -lt 200))
+        {$Observation+=[pscustomobject]  @{Observations="DB Write latency is high: $($Servercheck.WriteLatency), pleaes check are top database and queries causing it"; Priority="Low"}}
+        Elseif (($Servercheck.WriteLatency -gt 200))
+        {$Observation+=[pscustomobject]  @{Observations="DB Write latency is high: $($Servercheck.WriteLatency), pleaes check are top database and queries causing it"; Priority="Medium"}}
+
+        if (($Servercheck.Latency -gt 100) -And ($Servercheck.Latency -lt 200))
+        {$Observation+=[pscustomobject]  @{Observations="DB latency is high: $($Servercheck.Latency), pleaes check are top database and queries causing it"; Priority="Low"}}
+        Elseif (($Servercheck.Latency -gt 200))
+        {$Observation+=[pscustomobject]  @{Observations="DB latency is high: $($Servercheck.Latency), pleaes check are top database and queries causing it"; Priority="Medium"}}
+
+    }
+    catch
+    {
+        $AppErrorCollection+=[pscustomobject] @{ErrorType="Powershell";ErrorActivityName=$ActivityName;ErrorMessage=$($_.exception.message) }
+        $AppErrorCollection  | write-PHLog -echo -Logtype Error
     }
 
 
-"Checking if Disk Latency to be reported in observations" | write-PHLog -echo -Logtype Debug2
-    if (($Servercheck.ReadLatency -gt 200) -And ($Servercheck.ReadLatency -lt 300))
-    {$Observation+=[pscustomobject]  @{Observations="DB Read latency is high: $($Servercheck.ReadLatency), pleaes check are top database and queries causing it"; Priority="Low"}}
-    Elseif (($Servercheck.ReadLatency -gt 300))
-    {$Observation+=[pscustomobject]  @{Observations="DB Read latency is high: $($Servercheck.ReadLatency), pleaes check are top database and queries causing it"; Priority="Low"}}
+    Try
+    {
+        $ActivityName="Checking if database growth to be reported in observations"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        if ($RetQuerydatabaseGrowthResult)
+        {
+            $DbGrowthSummary=$RetQuerydatabaseGrowthResult | measure-object -property TotalGrowthMB -minimum -maximum -average -sum
 
-    if (($Servercheck.WriteLatency -gt 100) -And ($Servercheck.WriteLatency -lt 200))
-    {$Observation+=[pscustomobject]  @{Observations="DB Write latency is high: $($Servercheck.WriteLatency), pleaes check are top database and queries causing it"; Priority="Low"}}
-    Elseif (($Servercheck.WriteLatency -gt 200))
-    {$Observation+=[pscustomobject]  @{Observations="DB Write latency is high: $($Servercheck.WriteLatency), pleaes check are top database and queries causing it"; Priority="Medium"}}
+            if (!($DbGrowthSummary -eq $null)) {$DbGrowthSummary.Sum=[math]::round($DbGrowthSummary.Sum)}
 
+            if ($DbGrowthSummary.Sum -gt 1000) 
+            {$Observation+=[pscustomobject]  @{Observations="Unusual DB growth have been noticed in last 2 days: $($DbGrowthSummary.Sum) MB, pleaes check if this is due to any adhoc activity"; Priority="Low"}}
 
+            if (($DbGrowthSummary.Count -gt 1) -and ($DbGrowthSummary.Sum -gt 200))
+            {$Observation+=[pscustomobject]  @{Observations="$($DbGrowthSummary.Count) DB growth events have been noticed in last 2 days, pleaes check if this is due to any adhoc activity"; Priority="Low"}}
 
-    if (($Servercheck.Latency -gt 100) -And ($Servercheck.Latency -lt 200))
-    {$Observation+=[pscustomobject]  @{Observations="DB latency is high: $($Servercheck.Latency), pleaes check are top database and queries causing it"; Priority="Low"}}
-    Elseif (($Servercheck.Latency -gt 200))
-    {$Observation+=[pscustomobject]  @{Observations="DB latency is high: $($Servercheck.Latency), pleaes check are top database and queries causing it"; Priority="Medium"}}
+        }
 
+        $ActivityName="Checking if OS or SQL uptime to be reported in observations"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        if (($Machine_UpTime.Days -gt 30) -And ($Machine_UpTime.Days -lt 90))
+        {$Observation+=[pscustomobject]  @{Observations="OS has not been rebooted for a while $($Servercheck.Machine_UpTime)"; Priority="Low"}}
+        elseif (($Machine_UpTime.Days -gt 90))
+        {$Observation+=[pscustomobject]  @{Observations="OS has not been rebooted for a while $($Servercheck.Machine_UpTime)"; Priority="Medium"}}
 
-"Checking if database growth to be reported in observations" | write-PHLog -echo -Logtype Debug2
-    $DbGrowthSummary=$RetQuerydatabaseGrowthResult | measure-object -property TotalGrowthMB -minimum -maximum -average -sum
-    if (!($DbGrowthSummary -eq $null)) {$DbGrowthSummary.Sum=[math]::round($DbGrowthSummary.Sum)}
-    if ($DbGrowthSummary.Sum -gt 1000) 
-    {$Observation+=[pscustomobject]  @{Observations="Unusual DB growth have been noticed in last 2 days: $($DbGrowthSummary.Sum) MB, pleaes check if this is due to any adhoc activity"; Priority="Low"}}
-    if (($DbGrowthSummary.Count -gt 1) -and ($DbGrowthSummary.Sum -gt 200))
-    {$Observation+=[pscustomobject]  @{Observations="$($DbGrowthSummary.Count) DB growth events have been noticed in last 2 days, pleaes check if this is due to any adhoc activity"; Priority="Low"}}
-
-"Checking if OS or SQL uptime to be reported in observations" | write-PHLog -echo -Logtype Debug2
-    if (($Machine_UpTime.Days -gt 30) -And ($Machine_UpTime.Days -lt 90))
-    {$Observation+=[pscustomobject]  @{Observations="OS has not been rebooted for a while $($Servercheck.Machine_UpTime)"; Priority="Low"}}
-    elseif (($Machine_UpTime.Days -gt 90))
-    {$Observation+=[pscustomobject]  @{Observations="OS has not been rebooted for a while $($Servercheck.Machine_UpTime)"; Priority="Medium"}}
-
-    if (($SQLServer_UpTime.Days -gt 30) -And ($SQLServer_UpTime.Days -lt 90))
-    {$Observation+=[pscustomobject]  @{Observations="SQL Server has not been rebooted for a while $($Servercheck.SQLServer_UpTime)"; Priority="Low"}}
-    elseif (($SQLServer_UpTime.Days -gt 90))
-    {$Observation+=[pscustomobject]  @{Observations="SQL Server has not been rebooted for a while $($Servercheck.SQLServer_UpTime)"; Priority="Medium"}}
+        if (($SQLServer_UpTime.Days -gt 30) -And ($SQLServer_UpTime.Days -lt 90))
+        {$Observation+=[pscustomobject]  @{Observations="SQL Server has not been rebooted for a while $($Servercheck.SQLServer_UpTime)"; Priority="Low"}}
+        elseif (($SQLServer_UpTime.Days -gt 90))
+        {$Observation+=[pscustomobject]  @{Observations="SQL Server has not been rebooted for a while $($Servercheck.SQLServer_UpTime)"; Priority="Medium"}}
     
     
-"Checking if OS or SQL memory configuraion to be reported in observations" | write-PHLog -echo -Logtype Debug2
-    $ExpectedPLE=$($Servercheck.TotalPhysicalMemory/4)*300
+        $ActivityName="Checking if OS or SQL memory configuraion to be reported in observations"
+        $ActivityName | write-PHLog -echo -Logtype Debug2
+        $ExpectedPLE=$($Servercheck.TotalPhysicalMemory/4)*300
 
-    if ($Servercheck.FreePhysicalMemory -lt .3)
-    {
-        $Observation+=[pscustomobject]  @{Observations="Free memory for OS is very low, check whats consuming OS memory"; Priority="Medium"}
-
-        if ($Servercheck.PLE -gt $ExpectedPLE)
+        if ($Servercheck.FreePhysicalMemory -lt .3)
         {
-            $Observation+=[pscustomobject]  @{Observations="OS free memory is low though PLE is very high, reduce Min/Max to releaes memory for OS"; Priority="Medium"}
+            $Observation+=[pscustomobject]  @{Observations="Free memory for OS is very low, check whats consuming OS memory"; Priority="Medium"}
+
+            if ($Servercheck.PLE -gt $ExpectedPLE)
+            {
+                $Observation+=[pscustomobject]  @{Observations="OS free memory is low though PLE is very high, reduce Min/Max to releaes memory for OS"; Priority="Medium"}
+            }
+        }
+
+        if ($Servercheck.PLE -lt $ExpectedPLE)
+        {
+            if ($Servercheck.FreePhysicalMemory -gt 1)
+            {
+                $Observation+=[pscustomobject]  @{Observations="PLE is low, OS has more than 1 GB free memory, please check if increase Min/Max memory for SQL make sense"; Priority="Medium"}
+            }
+        }
+
+
+        if ($Servercheck.MinMem -ne $Servercheck.MaxMem)
+        {
+                $Observation+=[pscustomobject]  @{Observations="SQL assigned Min and Max ram is diff please validate if thats expected?"; Priority="Low"}
+        }
+
+        $TotalPhysicalMemory=$Servercheck.TotalPhysicalMemory
+        if ($TotalPhysicalMemory -le 4) {$SQLMaxMinMemoryGB = 2700}
+        elseif ($TotalPhysicalMemory -le 16000) {$SQLMaxMinMemoryGB = $($TotalPhysicalMemory*1024)-2000}
+        else {$SQLMaxMinMemoryGB = $($TotalPhysicalMemory*1024)-4000}
+
+        if ($Servercheck.MaxMem -gt $SQLMaxMinMemoryGB)
+        {
+                $Observation+=[pscustomobject]  @{Observations="SQL assigned Max ram more than recommended memory value: $($SQLMaxMinMemoryGB) please validate why?"; Priority="Low"}
         }
     }
-
-    if ($Servercheck.PLE -lt $ExpectedPLE)
+    catch
     {
-        if ($Servercheck.FreePhysicalMemory -gt 1)
-        {
-            $Observation+=[pscustomobject]  @{Observations="PLE is low, OS has more than 1 GB free memory, please check if increase Min/Max memory for SQL make sense"; Priority="Medium"}
-        }
-    }
-
-
-    if ($Servercheck.MinMem -ne $Servercheck.MaxMem)
-    {
-            $Observation+=[pscustomobject]  @{Observations="SQL assigned Min and Max ram is diff please validate if thats expected?"; Priority="Low"}
-    }
-
-    $TotalPhysicalMemory=$Servercheck.TotalPhysicalMemory
-    if ($TotalPhysicalMemory -le 4) {$SQLMaxMinMemoryGB = 2700}
-    elseif ($TotalPhysicalMemory -le 16000) {$SQLMaxMinMemoryGB = $($TotalPhysicalMemory*1024)-2000}
-    else {$SQLMaxMinMemoryGB = $($TotalPhysicalMemory*1024)-4000}
-
-    if ($Servercheck.MaxMem -gt $SQLMaxMinMemoryGB)
-    {
-            $Observation+=[pscustomobject]  @{Observations="SQL assigned Max ram more than recommended memory value: $($SQLMaxMinMemoryGB) please validate why?"; Priority="Low"}
+        $AppErrorCollection+=[pscustomobject] @{ErrorType="Powershell";ErrorActivityName=$ActivityName;ErrorMessage=$($_.exception.message) }
+        $AppErrorCollection  | write-PHLog -echo -Logtype Error
     }
 
 
 
-"Adding key memory info to be added to the top of report" | write-PHLog -echo -Logtype Debug2
+
+
+    $ActivityName="Adding key memory info to be added to the top of report"
+    $ActivityName | write-PHLog -echo -Logtype Debug2
     $body="<H2>Memory Stats</H2>" 
     $KeyServerStats=$Servercheck | select Name,TotalPhysicalMemory,FreePhysicalMemory,MaxMem,MinMem,PLE | ConvertTo-HTML  -head $a  -body $body 
 
-"Adding key CPU info to be added to the top of report" | write-PHLog -echo -Logtype Debug2
+    $ActivityName="Adding key CPU info to be added to the top of report"
+    $ActivityName | write-PHLog -echo -Logtype Debug2
     $body="<H2>CPU Stats</H2>" 
     $KeyServerStats+=$Servercheck | select Machine_UpTime,SQLServer_UpTime,NumberOfLogicalProcessors | ConvertTo-HTML  -head $a   -body $body 
 
@@ -1265,6 +1443,8 @@ order by record_id desc
     $OtherProcessUtilization=$RetQuerydatabaseCPUUsageResult| measure-object -property OtherProcessUtilization -minimum -maximum -average
     $CPUMeasureDuration=$RetQuerydatabaseCPUUsageResult| measure-object -property EventTime -minimum -maximum | select minimum,maximum
     $CPUDuration=$((NEW-TIMESPAN –Start $CPUMeasureDuration.Minimum –End $CPUMeasureDuration.Maximum).TotalHours)
+
+
 
     $CPUStats=[pscustomobject]  @{
         CPUDurationHours=[math]::round($CPUDuration)
@@ -1282,7 +1462,8 @@ order by record_id desc
         OtherProcessUtilizationminimum=[math]::round($OtherProcessUtilization.minimum)
     }
 
-"Checking if CPU stats to be reported in observations" | write-PHLog -echo -Logtype Debug2
+    $ActivityName="Checking if CPU stats to be reported in observations"
+    $ActivityName | write-PHLog -echo -Logtype Debug2
     if ($CPUStats.SQLCPUAverage30Min -gt 40)
     {$Observation+=[pscustomobject]  @{Observations="SQL is using high CPU, check top queries and sessions using CPU in last 30 Minute"; Priority="Medium"}}
 
@@ -1292,17 +1473,43 @@ order by record_id desc
     $CPUStats | select CPUDurationHours,SQLCPUAverage30Min,SQLCPUAverage,OtherProcessUtilizationAverage,IdleCPUAverage,SQLCPUmaximum30Min,SQLCPUmaximum,OtherProcessUtilizationMaximum,IdleCPUmaximum,SQLCPUminimum30Min,SQLCPUminimum,OtherProcessUtilizationminimum,IdleCPUminimum
     $KeyServerStats+=$CPUStats | select CPUDurationHours,SQLCPUAverage30Min,SQLCPUAverage,OtherProcessUtilizationAverage,IdleCPUAverage,SQLCPUmaximum30Min,SQLCPUmaximum,OtherProcessUtilizationMaximum,IdleCPUmaximum,SQLCPUminimum30Min,SQLCPUminimum,OtherProcessUtilizationminimum,IdleCPUminimum| ConvertTo-HTML  -head $a  
 
-"Adding key dataabse usage stats to be added to the top of report" | write-PHLog -echo -Logtype Debug2
+    $ActivityName="Adding key dataabse usage stats to be added to the top of report"
+    $ActivityName | write-PHLog -echo -Logtype Debug2
     $body="<H2>Database Usage Summary</H2>" 
     $KeyServerStats+=$Servercheck | select Latency,WriteLatency,ReadLatency | ConvertTo-HTML  -head $a   -body $body 
     $KeyServerStats+= $DiskStatsSummarized | select ServerName,Drive,FileType,DiskSize,DiskUsedSpace,DiskFreespace,DiskFreePercentage,DBFileSizeGB,DBFileSpaceUsedGB,DBFileFreeSpaceGB,DBFreePercentage | Sort-Object -Property FileType -Descending | ConvertTo-HTML  -head $a 
 
-"Adding observations sumamry to the top of report" | write-PHLog -echo -Logtype Debug2
+    $ActivityName="Adding observations sumamry to the top of report"
+    $ActivityName | write-PHLog -echo -Logtype Debug2
     $body="<H2>Observations</H2>" 
     $ObservationsHTML=$Observation  | Select Observations,Priority| ConvertTo-HTML  -head $a  -body $body
+
     $RetsqlConfigHTMLCombined= $ObservationsHTML+ $KeyServerStats+$RetsqlConfigHTML
 
-"Sending email with all observations to $EmailSender" | write-PHLog -echo -Logtype Debug2
-$emailSubject=$ServerInstance + ": Server Summary as of - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString()) " 
-fnSendEmail -FromEmail  $EmailSender -EmailHTML $RetsqlConfigHTMLCombined -emailSubject $emailSubject -HostName $lHostName -smtpserver $smtpserver
+    $RetsqlConfigHTMLCombined= $RetsqlConfigHTMLCombined|
+    Foreach-Object {
+        $_ -replace  $ColorIncomplete -replace $ColorFailed -replace $ColorCancelled -replace $ColorActive
+        }	
+}
+else
+{
+
+    $FailedConnection= [pscustomobject] @{FailedConnection="Could not connect to server $lHostName"; ErrorMessage=$RetSystemSummary.ExecuteSQLError}
+    $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    $connectionfailed=$true
+}
+
+if ($AppErrorCollection)
+{
+    $body="<H2>Errors during collecting server health check v2</H2>" 
+    $RetsqlConfigHTMLCombined+=$AppErrorCollection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors | ConvertTo-HTML  -head $a  -body $body 
+}
+
+
+$ActivityName="Sending email with all observations to $EmailSender"
+$ActivityName | write-PHLog -echo -Logtype Debug2
+$emailSubject=$FullSQlInstance + ": Server Summary as of - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString()) " 
+fnSendEmail -FromEmail   $EmailSender  -EmailHTML $RetsqlConfigHTMLCombined -emailSubject $emailSubject -HostName $CentralHost -smtpserver $smtpserver
 "Script completed" | write-PHLog -echo -Logtype Success
+
+
