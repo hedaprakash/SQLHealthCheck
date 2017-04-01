@@ -1,9 +1,9 @@
 ﻿param (
-    [string]$EmailSender = "sqltest@gmail.com",
-    [string]$ServerInstance = "",
-    [string]$SqlUser = "svcsql",
-    [string]$SqlPassword = "testpass",
-    [string]$smtpserver = "smtp.sqlfeatures.local"
+    [string]$EmailSender = "Pass Email address",
+    [string]$ServerInstance = "Pass server name",
+    [string]$SqlUser = "SQL user name for sql authentication",
+    [string]$SqlPassword = "",
+    [string]$smtpserver = "Enter SMTP Server here fo emails"
     )
 
 #+-------------------------------------------------------------------+    
@@ -199,24 +199,27 @@ if ($RetSystemSummary.TestSqlAcces -eq $true)
 "Collect processor information" | write-PHLog -echo -Logtype Debug2
     $GetProcessorCount= 'powershell.exe -c "$colItems =Get-WmiObject -class "Win32_Processor" -namespace "root/CIMV2" ;    $NOfLogicalCPU = 0;    foreach ($objcpu in $colItems)    {$NOfLogicalCPU = $NOfLogicalCPU + ($objcpu.NumberOfLogicalProcessors) }; $NOfLogicalCPU "'
     $RetProcessorCount =fnExecuteXPCmdShell  $FullSQlInstance $GetProcessorCount
-    if ($RetProcessorCount.ExecuteXMCmdShellError -ne "")
+    if (($RetProcessorCount.ExecuteXMCmdShellError -ne "") -and ($RetProcessorCount.ExecuteXMCmdShellError.length -ne 0))
     {
-        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get powershellprocessor info $lHostName"; ErrorMessage=$RetProcessorCount.ExecuteXMCmdShellError}
-        $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
-    }
-    $TotalProcessorCount=$RetProcessorCount.SQLResult.output|out-string
-
-"Collect last boot time" | write-PHLog -echo -Logtype Debug2
-    $GetMemorySpecs= 'powershell.exe -c "Get-WmiObject Win32_OperatingSystem | select csname,lastbootuptime,TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-XML -NoTypeInformation -As String"  '
-    $RetMemorySpecs =fnExecuteXPCmdShell  $FullSQlInstance $GetMemorySpecs
-    $RetMemorySpecsresult1=($RetMemorySpecs.SQLResult.output)
-    if (($RetMemorySpecs.ExecuteXMCmdShellError -ne "") -and ($RetMemorySpecs.ExecuteXMCmdShellError.length -ne 0))
-    {
-        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get OS info $lHostName"; ErrorMessage=$RetMemorySpecs.ExecuteXMCmdShellError}
+        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get powershellprocessor info $FullSQlInstance"; ErrorMessage=$RetProcessorCount.ExecuteXMCmdShellError}
         $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     }
     else 
     {
+        $TotalProcessorCount=$RetProcessorCount.SQLResult.output|out-string
+    }
+
+"Collect last boot time" | write-PHLog -echo -Logtype Debug2
+    $GetMemorySpecs= 'powershell.exe -c "Get-WmiObject Win32_OperatingSystem | select csname,lastbootuptime,TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-XML -NoTypeInformation -As String"  '
+    $RetMemorySpecs =fnExecuteXPCmdShell  $FullSQlInstance $GetMemorySpecs
+    if (($RetMemorySpecs.ExecuteXMCmdShellError -ne "") -and ($RetMemorySpecs.ExecuteXMCmdShellError.length -ne 0))
+    {
+        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get OS info $FullSQlInstance"; ErrorMessage=$RetMemorySpecs.ExecuteXMCmdShellError}
+        $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
+    else 
+    {
+        $RetMemorySpecsresult1=($RetMemorySpecs.SQLResult.output)
         $RetMemorySpecsresult2 =[xml]"$RetMemorySpecsresult1 "
         $LastBootTime=$RetMemorySpecsresult2.objects.object.SelectSingleNode('Property[@Name="lastbootuptime"]').innerxml
         $LastBootTime
@@ -263,6 +266,11 @@ if ($RetSystemSummary.TestSqlAcces -eq $true)
     $body="<H2>Computer Summary</H2>" 
     $RetsqlConfigHTML+= $RetServerSpecsresult3 |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
 }
+    else 
+    {
+        $FailedConnection= [pscustomobject] @{FailedConnection="Convert XML output to PS object $FullSQlInstance"; ErrorMessage=$RetServerSpecs.ExecuteXMCmdShellError}
+        $RetsqlConfigHTMLCombined+= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
 
 
 "Collect SQL key performance couters averaging last 1 min" | write-PHLog -echo -Logtype Debug2
@@ -698,6 +706,11 @@ else
         $body="<H2>Disk State</H2>" 
         $RetsqlConfigHTML+= $RetDiskSpecs3 |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     }
+    else 
+    {
+        $FailedConnection= [pscustomobject] @{FailedConnection="Collecting OS Disk Stats $FullSQlInstance"; ErrorMessage=$RetDiskSpecs.ExecuteXMCmdShellError}
+        $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    }
 
 
 "Collecting Database Disk Usage Summary" | write-PHLog -echo -Logtype Debug2
@@ -824,7 +837,7 @@ select * from tempdb..tmpphdatabaseUsageSummary
 	    $RetdatabaseUsageSummary1= fnExecuteQuery -ServerInstance $FullSQlInstance -Database "master" -Query  $QuerydatabaseUsageSummary -ReadIntentTrue $readIntent
         if ($RetdatabaseUsageSummary1.ExecuteSQLError -ne "")
         {
-            $FailedConnection= [pscustomobject] @{FailedConnection="Could not collect database usage summary $lHostName"; ErrorMessage=$RetdatabaseUsageSummary1.ExecuteSQLError}
+            $FailedConnection= [pscustomobject] @{FailedConnection="Could not collect database usage summary $FullSQlInstance"; ErrorMessage=$RetdatabaseUsageSummary1.ExecuteSQLError}
             $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
         }
         else 
@@ -1203,9 +1216,9 @@ GO
 "Collecting Top memory consuming processes from OS" | write-PHLog -echo -Logtype Debug2
     $GetTopMemoryProcesses= 'powershell.exe -c "get-wmiobject WIN32_PROCESS | Sort-Object -Property ws -Descending|select -first 5|Select processname, ws,ProcessID,PageFileUsage,VM,VirtualSize,Handle,ReadTransferCount,ReadOperationCount,MaximumWorkingSetSize,MinimumWorkingSetSize   ,PageFaults,ParentProcessId,PeakPageFileUsage,PeakVirtualSize,PeakWorkingSetSize,Priority,PrivatePageCount,ThreadCount,WorkingSetSize,WriteOperationCount,WriteTransferCount       | ConvertTo-XML -NoTypeInformation -As String"  '
     $RetTopMemoryProcesses =fnExecuteXPCmdShell  $FullSQlInstance $GetTopMemoryProcesses
-    if ($RetTopMemoryProcesses.ExecuteXMCmdShellError -ne "")
+    if (($RetTopMemoryProcesses.ExecuteXMCmdShellError -ne "") -and ($RetTopMemoryProcesses.ExecuteXMCmdShellError.length -ne 0))
     {
-        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get WIN32_PROCESS WMI data  $lHostName"; ErrorMessage=$RetTopMemoryProcesses.ExecuteXMCmdShellError}
+        $FailedConnection= [pscustomobject] @{FailedConnection="Could not get WIN32_PROCESS WMI data  $FullSQlInstance"; ErrorMessage=$RetTopMemoryProcesses.ExecuteXMCmdShellError}
         $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     }
     else
@@ -1495,7 +1508,7 @@ else
 {
 
     $FailedConnection= [pscustomobject] @{FailedConnection="Could not connect to server $lHostName"; ErrorMessage=$RetSystemSummary.ExecuteSQLError}
-    $RetsqlConfigHTMLCombined= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
+    $RetsqlConfigHTMLCombined+= $FailedConnection |Select * -ExcludeProperty RowError, RowState, Table, ItemArray, HasErrors| ConvertTo-HTML  -head $a   -body $body
     $connectionfailed=$true
 }
 
