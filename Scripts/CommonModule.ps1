@@ -33,12 +33,6 @@ function write-PHLog {
 $CurrentPath=$pwd
 set-location c:\ -PassThru | out-null
 
-if ([string]::IsNullOrEmpty($ExecutionSummaryLogFile))
-{
-    write-warning ("Write-PHLog function failed as log file name is not populated `nPleaes populate variable: `$ExecutionSummaryLogFile `nexiting now `n`n")
-    exit
-}
-
     Try {            
             $LogToWriteRec=@()
             $flgObject=$false
@@ -83,27 +77,18 @@ if ([string]::IsNullOrEmpty($ExecutionSummaryLogFile))
 
 
 # Function to execute SQL commands and trap errors gracefully
-function fnExecuteQuery {
-Param (
+function fnExecuteQuery (
   [string] $ServerInstance = $(throw "DB Server Name must be specified."),
   [string] $Database = "master",
   [string] $Query = $(throw "QueryToExecute must be specified."),
   [string] $ReadIntentTrue = $null,
   [int] $QueryTimeout=60000
   )
-
+{
     Try
     {
 
         $TestSqlAcces=$false
-
-        if (!($Query -match "SET TRANSACTION ISOLATION LEVEL"))
-        {
-            $Query = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
-                    go
-            " + $Query
-        }
-
         if ($SqlPassword.Length -ne 0)
         {	    
             $ReturnResultset=invoke-sqlcmd -ServerInstance $ServerInstance -database $Database -Query $Query -QueryTimeout $QueryTimeout -Username $SqlUser -Password $SqlPassword   -Verbose  -ErrorAction Stop 
@@ -115,21 +100,13 @@ Param (
         $TestSqlAcces=$true
         $sqlresult=$ReturnResultset
         if ($sqlresult -match "Timeout expired")
-        {
-            $SQLTimeoutExpired=$True
-            $errorMsg=$sqlresult
-        }
+        {$SQLTimeoutExpired=$True}
 
     }
         Catch 
         {
             Write-Warning $_.exception.message
             $errorMsg=$_.exception.message
-
-            if ($errorMsg -match "Timeout expired")
-            {
-                $SQLTimeoutExpired=$True
-            }
 
             if ($errorMsg -match "A network-related or instance-specific error occurred while establishing a connection to SQL Server")
             {$SQLPortissue=$True}
@@ -160,13 +137,12 @@ Param (
 }
 
 
-
 # Function to execute OS WMI commands via XP_cmdshell and trap errors gracefully
-function fnExecuteXPCmdShell {
-Param (
+function fnExecuteXPCmdShell (
   [string] $NodeName = $(throw "User Name must be specified."),
   [string] $CommandToExecute = $(throw "User Name must be specified.")
 )
+{
 
 $UserName="";$CommandSuccess="";$AdvanceOptionsConfigValue=""; $XPCMDShellConfigValue=""; 
 $QueryEnableXP_cmdshell=""; $QueryEnable_AdvanceOptionsConfigValue=""
@@ -324,14 +300,14 @@ end
 
 #Function to Send emails
 
-function fnSendEmail{
-    Param (
-      [string] $FromEmail = $(throw "From email must be specified."),
-      [string] $emailSubject = $(throw "Email Subject must be specified."),
-      [string] $EmailHTML = $(throw "Email content must be specified."),
-      [string] $HostName = $(throw "Host Name must be specified."),
-      [string] $smtpserver = "",
-      [string] $ToEmail = "")
+function fnSendEmail
+(
+  [string] $FromEmail = $(throw "From email must be specified."),
+  [string] $emailSubject = $(throw "Email Subject must be specified."),
+  [string] $EmailHTML = $(throw "Email content must be specified."),
+  [string] $HostName = $(throw "Host Name must be specified."),
+  [string] $smtpserver = "",
+  [string] $ToEmail = "")
 <#
 $RetsqlConfigHTML="test"
 $EmailHTML="Test"
@@ -339,7 +315,7 @@ $fromemail= "svcsqlmon@sqlfeatures.local"
 $emailSubject=$lServerName + ": Server Summary as of - $((Get-Date).ToShortDateString())  $((Get-Date).ToShortTimeString()) " 
 fnSendEmail -FromEmail  svcsqlmon@sqlfeatures.local -EmailHTML $EmailHTML -emailSubject $emailSubject -Host "AALLINONEE1"
 #>
-
+{
 
     $userDomain=$env:userdnsdomain
 
